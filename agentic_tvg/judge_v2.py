@@ -1,17 +1,11 @@
 """Answer-equivalence judge, INSTRUMENT V2: Anthropic API, sonnet, question-
 anchored rubric, disk-cached.
 
-**This is the default instrument since 2026-09-01** (reward.py: JUDGE_V
-defaults to "2"). Sibling module `judge.py` is instrument v1 (haiku,
-one-word rubric); it produced every v1 number under results/ and is reached
-with `JUDGE_V=1`. Selection is by env var in reward.py, so which instrument
-a run used is recorded in its environment rather than in a source diff --
-and run_grpo.sh now exports it and prints a `[recipe]` line, because while
-v1 was the default every reported v2 number came from OFFLINE re-grading
-(judge_audit2.py) and a training run that forgot to export JUDGE_V=2 would
-have optimised against v1 for its whole 60h horizon with nothing in the log
-to say so. The two are NOT comparable and keep separate caches -- never
-average or trend v1 and v2 numbers together.
+Sibling module `judge.py` is instrument v1 (haiku, one-word rubric) and stays
+the default; it produced every v1 number under results/. Selection is by env
+var in reward.py (`JUDGE_V=2`), so which instrument a run used is recorded in
+its environment rather than in a source diff. The two are NOT comparable and
+keep separate caches -- never average or trend v1 and v2 numbers together.
 
 R_acc, one instrument (README "Reward"; revised 2026-08-26, the free matcher
 fast-path was removed -- it saved ~$1-3/run and created a matcher-vs-judge
@@ -70,11 +64,7 @@ from agentic_tvg.answer_match import normalize
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-5")
 _CACHE_PATH = Path(os.environ.get("JUDGE_CACHE", "data/processed/judge_cache_v2.jsonl"))
 _TIMEOUT_S = float(os.environ.get("JUDGE_TIMEOUT", "30"))
-# 6 retries, exponential backoff to 45s (2026-09-03: a sonnet 529-Overloaded
-# burst outlasted 3 quick retries and JudgeUnavailable stopped the run at step
-# ~150 -- correct behaviour, wrong patience; ~1.5 min of cumulative backoff
-# rides out typical overload bursts). Env-overridable for tests.
-_RETRIES = int(os.environ.get("JUDGE_RETRIES", "6"))
+_RETRIES = 3
 
 _SYSTEM = ("You grade video question answering. Compare briefly, then end with a line: "
            "VERDICT: FULL or VERDICT: PARTIAL or VERDICT: INCORRECT")
@@ -120,8 +110,7 @@ _load_dotenv()
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", JUDGE_MODEL)
 
 _lock = threading.Lock()
-_cache: dict[str, float] = {}
-_cache_pos = 0     # bytes of _CACHE_PATH already folded into _cache
+_cache: dict[str, float] | None = None
 _client = None
 
 
@@ -135,49 +124,22 @@ def _key(question: str, gt: str, answer: str) -> str:
 
 
 def _load_cache() -> dict[str, float]:
-    """Fold the file's newly appended lines into _cache, return _cache.
-
-    Incremental since 2026-09-01 (call under _lock). The original loaded the
-    file once per process; under the async agent loop the reward runs in
-    several long-lived workers, so each worker was blind to every verdict the
-    others produced after its first load -- the first cold-cache val re-judged
-    47% of its triples (146 duplicate API calls in 309). Re-reading just the
-    appended bytes before every miss shrinks the duplicate window to the
-    in-flight API call itself (round-1 driver behaviour, ~0.1%).
-
-    Two deliberate details:
-    - only complete lines are consumed: another process may be mid-append, so
-      the partial tail stays unconsumed until the next refresh;
-    - `setdefault`, not assignment: the FIRST verdict for a triple wins, as
-      the module docstring always promised. (The old full reload was
-      last-line-wins -- the actual mechanism behind v1's 45 same-key verdict
-      flips.)
-    """
-    global _cache_pos
-    if not _CACHE_PATH.exists():
-        return _cache
-    try:
-        with _CACHE_PATH.open("rb") as f:
-            f.seek(_cache_pos)
-            chunk = f.read()
-    except OSError:
-        return _cache
-    end = chunk.rfind(b"\n")
-    if end < 0:
-        return _cache
-    for line in chunk[:end].split(b"\n"):
-        try:
-            rec = json.loads(line)
-            # _key doesn't encode the instrument, so the row must: a row
-            # from another model/rubric (v1 rows have no rubric field at
-            # all) never answers for this one, even if the files get
-            # mixed up or a JUDGE_MODEL override forgets JUDGE_CACHE.
-            if rec.get("model") != JUDGE_MODEL or rec.get("rubric") != _RUBRIC_V:
-                continue
-            _cache.setdefault(rec["k"], float(rec["v"]))
-        except (json.JSONDecodeError, KeyError, ValueError):
-            continue
-    _cache_pos += end + 1
+    global _cache
+    if _cache is None:
+        _cache = {}
+        if _CACHE_PATH.exists():
+            for line in _CACHE_PATH.read_text().splitlines():
+                try:
+                    rec = json.loads(line)
+                    # _key doesn't encode the instrument, so the row must: a row
+                    # from another model/rubric (v1 rows have no rubric field at
+                    # all) never answers for this one, even if the files get
+                    # mixed up or a JUDGE_MODEL override forgets JUDGE_CACHE.
+                    if rec.get("model") != JUDGE_MODEL or rec.get("rubric") != _RUBRIC_V:
+                        continue
+                    _cache[rec["k"]] = float(rec["v"])
+                except (json.JSONDecodeError, KeyError):
+                    continue
     return _cache
 
 
@@ -266,18 +228,12 @@ def judge_answer(question: str, gt_text: str, answer: str) -> float | None:
                 raise JudgeUnavailable(
                     f"{JUDGE_MODEL} failed {_RETRIES}x ({type(exc).__name__}: {exc})") from exc
             last_failure = f"{type(exc).__name__}: {exc}"
-        time.sleep(min(2.0 * 2 ** attempt, 45.0))
+        time.sleep(1.5 * (attempt + 1))
     if verdict is None:
         raise JudgeUnavailable(
             f"{JUDGE_MODEL} gave no parseable verdict in {_RETRIES} attempts ({last_failure})")
     with _lock:
-        cache = _load_cache()
-        if key in cache:
-            # A concurrent worker landed the same triple while our call was in
-            # flight: keep THEIR verdict (first wins, consistently across
-            # processes) and append nothing -- ours was the wasted call.
-            return cache[key]
-        cache[key] = verdict
+        _load_cache()[key] = verdict
         _append(key, verdict, question, gt_text, answer)
     return verdict
 
