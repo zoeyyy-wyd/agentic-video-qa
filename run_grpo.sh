@@ -1,0 +1,360 @@
+#!/usr/bin/env bash
+# GRPO Stage-2 (plan §5) — Qwen3-VL-4B + LoRA + crop_video multi-turn, 1x A100 80GB.
+# QA-reworked 2026-08-26: data from extract_rl.py, reward = compute_score_qa.
+# Round 2 defaults since 2026-09-01: reward = compute_score_qa2 (IoU weight
+# 1.0), R_acc instrument = judge v2 (JUDGE_V=2), lr schedule = constant,
+# EXP_NAME = grpo_v2 -> results/grpo-v2/. Round 1 is reproduced by setting all
+# four back explicitly (see "Round 1 reproduction" below); the two are NOT
+# comparable if only some of them are.
+#
+# Every non-default key below was verified against verl 0.9.0 source:
+# - rollout.mode=async + data.return_raw_chat=True    -> agent-loop path (docs/start/agentic_rl.rst)
+# - agent.default_agent_loop=tool_agent               -> rows also carry agent_name="tool_agent"
+# - multi_turn.tool_config_path                       -> crop_video_tool.yaml (CropVideoTool)
+# - rollout.load_format=safetensors + lora_rank>0     -> LoRA-RL contract (docs/advance/ppo_lora.rst)
+# - fsdp_config.*_offload=False                       -> a SPEED choice, not a memory fix.
+#   param_offload exists for full-parameter finetuning, where params+grads+Adam
+#   states cannot coexist with vLLM. With LoRA only the adapter is trainable
+#   (126 MiB of weights, 265 MiB of optimizer state), so resident need is ~18G
+#   against the 80-52=28G that survives vLLM waking up. Measured 2026-08-27:
+#   785 s/step vs 876 s with offload on -- 91 s/step, ~6.7 h over 267 steps,
+#   from not shuttling 35 G of params across PCIe twice per step.
+#   It barely moves host RAM (peak 171 vs 175 G): the CPU-side WorkerDict
+#   footprint is FSDP scaffolding, not the parked params. Cost is VRAM
+#   headroom, 23 G -> 6.5 G, spent at the weight-sync instant (73.5/80 G,
+#   identical on all 4 measured steps -- deterministic, not load-dependent).
+#   If that is too thin: gpu_memory_utilization=0.55 buys back ~8 G.
+# - actor.use_kl_loss=True (NOT algorithm.use_kl_in_reward) -> the GRPO paper puts
+#   KL in the loss, not in the reward; mixing it into the reward would also
+#   corrupt the reward numbers we report. Free here: lora_rank>0 makes verl set
+#   ref_in_actor (ray_trainer.py:360), so the reference policy is this same
+#   actor with the adapter switched off -- no second worker, no extra VRAM.
+# - exclude_modules '.*visual.*'                      -> keep the ViT frozen; LoRA on the LLM only
+# - max_user_turns=3 / max_assistant_turns=4          -> T=3 tool calls + final answer
+# - limit_images=112                                  -> vLLM mm budget: 3 crops x 30 frames + slack
+# - engine_kwargs.vllm.mm_processor_kwargs            -> cap profiling dummy images at the real crop
+#   .max_pixels=150528                                   size; without it vLLM profiles 112 images at
+#                                                        the preprocessor default 16.7M px and eats
+#                                                        the whole KV pool (FRAMES_SWEEP.md §5)
+# - data.val_batch_size=2                             -> loader batch, NOT a row cap:
+#   all 114 val rows still run, two at a time. The val at test_freq=20 fires with
+#   the training state resident (actor + optimizer + vLLM), which is where the
+#   2026-08-26 c30 smoke lost a DataLoader worker to `signal: Killed`; unset, the
+#   loader takes all 114 in one bite. A val_only pass over 114 is fine on its own
+#   (measured the same day), so this is about the in-training slot.
+#   Deliberately NOT capping rows with val_max_samples: it would buy ~1.2h of a ~60h run
+#   and silently make every val_only run a subset of the val set.
+# - max_actor_ckpt_to_keep, NOT max_ckpt_to_keep    -> the SFT trainer reads
+#   `trainer.max_ckpt_to_keep`; the PPO trainer reads `max_actor_ckpt_to_keep`
+#   / `max_critic_ckpt_to_keep` (ray_trainer.py:1006). Copying the SFT name
+#   over cost a run on 2026-08-27: Hydra's `+` happily created the key, nothing
+#   read it, and two 17G checkpoints piled up until / hit 93%. Wrong-but-legal
+#   config keys fail silently -- verify with `ls results/<run>/ckpt` after the
+#   second save, not by reading the override list.
+# - trainer.use_v1=False                              -> V1 TaskRunner imports `transfer_queue`,
+#                                                       which the verl 0.9.0 wheel neither ships nor
+#                                                       declares as a dep (ENVIRONMENT.md §8)
+# - rollout.max_model_len=prompt+response             -> left unset it falls back to
+#                                                       max_position_embeddings=262144, whose single-
+#                                                       sequence KV (~36G) exceeds the 0.45-util KV
+#                                                       pool -> vLLM refuses to init (ENVIRONMENT.md §8)
+#
+# Ablation switches (plan §6):
+#   REWARD_FN=compute_score_penalty EXP_NAME=grpo_penalty bash run_grpo.sh
+#   MAX_USER_TURNS=1 EXP_NAME=grpo_t1 bash run_grpo.sh                                      (multi-turn value, T=3 vs T=1)
+#
+# Round 1 reproduction (all three must be set together -- the defaults above
+# are round 2 since 2026-09-01):
+#   JUDGE_V=1 REWARD_FN=compute_score_qa EXP_NAME=grpo_vanilla \
+#   bash run_grpo.sh actor_rollout_ref.actor.optim.lr_scheduler_type=cosine
+set -xeuo pipefail
+cd "$(dirname "$0")"
+REPO=$(pwd)
+
+# Guard the two silent killers before spending hours: wrong conda env, and the
+# missing LD_PRELOAD that breaks torchcodec's first video decode (ENVIRONMENT.md §7).
+set +x; source "${REPO}/env_setup/preflight.sh"; set -x
+
+# GRPO starts from the SFT-merged model, not the raw base -- pointing at the
+# base silently discards the cold start, and you would not find out until the
+# run ends ~60h later. Made the default rather than an env var you must
+# remember; the zero-shot baseline is the exception and states itself:
+#   MODEL_PATH=${REPO}/models/Qwen3-VL-4B-Instruct bash run_grpo.sh ...
+MODEL_PATH=${MODEL_PATH:-${REPO}/results/sft-mix/merged}
+[ -d "${MODEL_PATH}" ] || { echo "MODEL_PATH does not exist: ${MODEL_PATH}" >&2
+    echo "  build it with: python merge_adapter.py" >&2
+    echo "  or pass MODEL_PATH=... explicitly (e.g. the base model for a baseline)" >&2
+    exit 1; }
+TRAIN_FILE=${TRAIN_FILE:-${REPO}/data/processed/rl_train.parquet}
+VAL_FILE=${VAL_FILE:-${REPO}/data/processed/rl_val.parquet}
+# Token budget knobs (frames sweep 2026-08-26: prompt ≈ 27 tok/frame + ~480
+# text/schema, so F=64→2.2K, F=128→3.9K, F=192→5.7K, F=256→7.4K; raise
+# MAX_PROMPT_LEN together with the parquet's nframes).
+# Production values (FRAMES_SWEEP.md §5): F=128 → prompt 4608; C=30 crops
+# (3 × ~4.6K worst) + reasoning → response 16384.
+MAX_PROMPT_LEN=${MAX_PROMPT_LEN:-4608}
+MAX_RESP_LEN=${MAX_RESP_LEN:-16384}
+EXP_NAME=${EXP_NAME:-grpo_v2}
+REWARD_FN=${REWARD_FN:-compute_score_qa2}      # round 2: 0.5*format + judge R_acc + 1.0*evidence-IoU
+
+# R_acc instrument. Exported (not just set) because reward.py reads it at
+# import time inside the Ray workers, and echoed because the whole point of an
+# env-var instrument selector is that the run RECORDS which one it used --
+# until 2026-09-01 nothing did, so a run could optimise against v1 for 60h
+# while every reported baseline came from an offline v2 re-grade. v1 and v2
+# verdicts are never comparable; pass JUDGE_V=1 only to reproduce a v1 number.
+JUDGE_V=${JUDGE_V:-2}
+export JUDGE_V
+GROUP_SIZE=${GROUP_SIZE:-16}                   # K=16 (FRAMES_SWEEP §5; GPU-free, costs wall time)
+# prompts/step. 8 x K=16 = 128 trajectories/step. Was 16 (=256 traj) until
+# 2026-08-27, when step 1 died with ray OutOfMemoryError at the vLLM weight
+# sync: the node has 188G of RAM and TaskRunner alone held 95.8G, because every
+# in-flight trajectory carries its decoded video frames as CPU tensors. K stays
+# at 16 -- GRPO's advantage is a within-group comparison, so K is the part that
+# must not shrink; batch only controls how many distinct prompts per step.
+# Measured at 8x16 by a 3-step smoke the same day: peak PSS 132G/188G (56G of
+# headroom) and 13.6 min/step. Halving the batch did NOT halve step time --
+# weight sync and the vLLM sleep/wake cycle are fixed costs per step.
+TRAIN_BS=${TRAIN_BS:-8}
+
+# lr: **constant 1e-5 since round 2** (GRPO2_PLAN §3c). Round 1 used cosine
+# decay to 0.1x over TOTAL_STEPS and plateaued from step 180, exactly where lr
+# had fallen below ~3e-6 -- the schedule froze learning in the phase the new
+# reward terms most need it. The 2026-09-01 oscillation analysis (§2) showed
+# the decay bought no stability either: lr fell 8x across the run while the
+# sawtooth amplitude grew 0.113 -> 0.176, tracking the between-prompt
+# difficulty spread, not the step size. verl's default is `constant` and RL
+# usually keeps it flat because the policy -- and therefore the objective --
+# moves under the optimizer, so "anneal toward a fixed optimum" does not
+# strictly apply. Side benefit: TOTAL_STEPS stops being a schedule denominator,
+# so extending or stopping early no longer bends the curve (the round-1 resume
+# footgun below disappears). Collapse fallback (entropy falling fast +
+# grad_norm rising, GRPO_NOTES §4): resume with
+# `...lr_scheduler_type=cosine ...min_lr_ratio=0.3`.
+#
+# The cosine reasoning below is kept for the round-1 record; min_lr_ratio is
+# inert under a constant schedule.
+# Two things followed from choosing cosine:
+#   - TOTAL_STEPS is now part of the schedule, not just a stopping point.
+#     Changing it reshapes the whole curve, and resuming a run under a
+#     different TOTAL_STEPS makes the lr jump rather than continue.
+#   - min_lr_ratio=0.1 keeps a floor. At the default 0.0 the lr reaches
+#     exactly 0 at the last step, so a run that goes the distance spends its
+#     final steps not learning -- and this one is budgeted at ~60h, long
+#     enough that being cut short is the likely outcome.
+MAX_USER_TURNS=${MAX_USER_TURNS:-3}
+# Horizon: EPOCHS, not a step count (round 2, 2026-09-01). verl derives
+# total_training_steps = len(train_dataloader) * total_epochs whenever
+# trainer.total_training_steps is null (ray_trainer.py:435), and the train
+# loader is drop_last=True, so 1,068 rl_train prompts at batch 8 give
+# floor(1068/8) = 133 steps/epoch -> EPOCHS=2 = 266 steps, ~60h at the
+# measured 13.6 min/step. Round 1 hardcoded 267 for the same 2 epochs.
+#
+# Two reasons the epoch form is now the right one:
+#   - the lr schedule is constant, so the horizon is no longer the denominator
+#     of an anneal. Under round-1's cosine, changing the step count reshaped
+#     the whole curve and a resume under a different value made lr JUMP; that
+#     footgun is gone, and with it the reason to pin the number by hand.
+#   - it tracks the data. Re-splitting SFT/RL (--sft-questions, DATA.md §3)
+#     changes the prompt pool, and 2 epochs stays 2 epochs instead of silently
+#     becoming 1.7 or 2.4 while the constant says 267.
+# Headroom says there is something to find: at the SFT start the format term is
+# already 0.487/0.5 but evidence_iou is 0.075/0.5, and the 3-step smoke moved
+# reward 0.998 -> 1.165, so this is not a policy that saturates immediately.
+# To resume, change nothing: `bash run_grpo.sh` and resume_mode=auto does it.
+EPOCHS=${EPOCHS:-2}
+# Optional hard cap, UNSET by default -- set it only for a short diagnostic run
+# (TOTAL_STEPS=20 bash run_grpo.sh). When set it overrides the epoch horizon;
+# when empty the flag is not passed at all and verl computes it from EPOCHS.
+TOTAL_STEPS=${TOTAL_STEPS:-}
+STEP_CAP=()
+if [ -n "${TOTAL_STEPS}" ]; then
+    STEP_CAP=(trainer.total_training_steps="${TOTAL_STEPS}")
+fi
+GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.65}             # 0.65 doubles KV pool vs 0.45; actor offloads during rollout
+LOGGER=${LOGGER:-'["console","tensorboard"]'}
+
+# results/<name>/ holds EVERYTHING this run generates, same convention as
+# run_sft.sh (2026-08-30 reorg): ckpt/ + rollouts/ + tb/ + console_<ts>.log
+# attempts + the merged console.log, curves and config snapshot the exit trap
+# writes. results/dataprep/ keeps prepare_data's download logs. Hyphens here,
+# underscores in EXP_NAME.
+RESULT_NAME=${RESULT_NAME:-${EXP_NAME//_/-}}
+RESULT_DIR=${REPO}/results/${RESULT_NAME}
+
+mkdir -p "${RESULT_DIR}"
+
+# One grep-able line per run recording what the reward actually was. set -x
+# traces the assignments above, but the trace is interleaved with thousands of
+# ray lines; this is the line to grep when a number needs an instrument.
+echo "[recipe] EXP_NAME=${EXP_NAME} REWARD_FN=${REWARD_FN} JUDGE_V=${JUDGE_V} MODEL_PATH=${MODEL_PATH} TRAIN_FILE=${TRAIN_FILE} EPOCHS=${EPOCHS}${TOTAL_STEPS:+ TOTAL_STEPS=${TOTAL_STEPS}}"
+
+# Disk guard. A checkpoint is ~17G and verl writes the new one before deleting
+# the old, so a save needs 2x that free. Warn rather than exit: resuming with a
+# tight disk is a legitimate thing to do, as long as you know it.
+_free_gb=$(df -BG --output=avail / | tail -1 | tr -d 'G ')
+# `|| true`: under pipefail an empty glob makes ls fail the whole pipeline,
+# and set -e then kills the script -- exactly what bit a fresh RESULT_DIR.
+_ckpts=$(ls -d "${RESULT_DIR}"/ckpt/global_step_* 2>/dev/null | wc -l || true)
+if [ "${_free_gb}" -lt 40 ]; then
+    echo "[warn] / has ${_free_gb}G free; a save needs ~34G (new + old side by side)." >&2
+    [ "${_ckpts}" -gt 1 ] && echo "[warn] ${_ckpts} checkpoints under ${RESULT_DIR}/ckpt -- retention is not pruning them. Delete all but the one named in latest_checkpointed_iteration.txt." >&2
+    echo "[warn] continuing anyway; check again after the next save." >&2
+fi
+export TENSORBOARD_DIR="${RESULT_DIR}/tb"
+
+# Plot on the way out, whatever the exit code -- run_sft.sh's trap, with two
+# changes. Fed from tb/ rather than the merged console log: the events survive
+# every crash and resume, and plot_grpo.py merges all of them last-write-wins
+# per step. And the hydra snapshot copy lives inside the trap (sft does it
+# after the pipeline) so a run that died still records the fully-resolved
+# config it actually ran with. console.log is still merged for grepping; the
+# [0-9] in the glob keeps it from feeding itself back in on the next run.
+plot_curves() {
+    local attempts=("${RESULT_DIR}"/console_[0-9]*.log)
+    if [ -e "${attempts[0]}" ]; then
+        cat "${attempts[@]}" > "${RESULT_DIR}/console.log"
+    fi
+    # awk NR==1, not head -1: head's early exit SIGPIPEs the writer, and under
+    # pipefail that 141 would take down the trap (same bug as hf_push.sh).
+    local _hydra
+    _hydra=$(ls -1dt outputs/*/*/.hydra 2>/dev/null | awk 'NR==1') || true
+    if [ -n "${_hydra:-}" ]; then
+        cp "${_hydra}/config.yaml" "${RESULT_DIR}/hydra_config.yaml"
+        cp "${_hydra}/overrides.yaml" "${RESULT_DIR}/hydra_overrides.yaml"
+    fi
+    if [ -d "${RESULT_DIR}/tb" ]; then
+        python plot_grpo.py "${RESULT_DIR}/tb" -o "${RESULT_DIR}/curves.png"             --csv "${RESULT_DIR}/metrics.csv" || true
+    fi
+}
+trap plot_curves EXIT
+
+# glibc allocator. These two are the fix for the three CPU OOMs of 2026-08-27
+# (GRPO_NOTES.md 6); do not drop them. glibc's mmap threshold is dynamic: every
+# time an mmap'd block is freed the threshold rises to that block's size (32MB
+# ceiling) and never comes back down. This project's allocation sizes sit right
+# in that range -- 588KB per frame, 52MB per crop tensor -- so one free pins it
+# at the ceiling, after which everything smaller is served from the heap and
+# never returned to the kernel. RSS then only climbs: measured
+# 111 -> 112 -> 129 -> dead at 182/188G. Setting them explicitly disables the
+# ratchet; 8 steps after, 96->99->116->132->99->100->100->101, i.e. it goes up
+# and comes back down. The trailing underscore is glibc's naming convention --
+# omit it and the variable is silently ignored, with no error.
+export MALLOC_MMAP_THRESHOLD_=${MALLOC_MMAP_THRESHOLD_:-131072}
+export MALLOC_TRIM_THRESHOLD_=${MALLOC_TRIM_THRESHOLD_:-134217728}
+
+# - +ray_kwargs.ray_init.object_store_memory=24GiB   -> cap Ray's plasma store.
+#   Default is 30% of node RAM (53.4G here), and its tmpfs arena only grows --
+#   pages once touched are never returned, so the ceiling IS the cost. Measured
+#   2026-08-28: one step's DataProto is a single 16.5G object, /dev/shm high
+#   water after 67 steps was 20G. Was 40G ("two generations with 2x margin");
+#   that sizing turned every late ref-release into +16.5G of floor, permanently
+#   -- the arena absorbed the overlap in RAM and never gave it back. Both OOM
+#   kills (08-28 22:26 step ~122, 08-29 04:14 step ~141) were two such misses
+#   plus one save/wake transient over the 95% line; per-step tokens/turns were
+#   identical, so the miss rate is pure timing variance, not workload growth.
+#   At 24G an overlap cannot be absorbed: Ray spills the old object to SSD
+#   (~30s, roughly once per 20-60 steps) and the ceiling stops random-walking.
+#   ray_init is **kwargs-forwarded to ray.init() (main_ppo.py:75); the key is
+#   real (inspect.signature confirms). If it ever overflows the symptom is an
+#   explicit ObjectStoreFullError, not a silent OOM.
+#
+# rollout_data_dir vs validation_data_dir: not interchangeable. The first is
+# read only inside the training loop (ray_trainer.py:1697); _validate dumps to
+# the second (:696), so a val_only run with just the first writes nothing.
+#
+# NB: never put a `#` comment between the backslash-continued lines of the
+# python3 invocation below. bash joins the lines first, so the comment then
+# swallows the REST OF THE COMMAND -- including the trailing "$@". That
+# silently dropped val_only/val_max_samples on 2026-08-26 and turned a 10-row
+# eval into a full 114-row validation followed by real GRPO training.
+#
+# Do NOT export PYTORCH_CUDA_ALLOC_CONF=expandable_segments here (run_sft.sh
+# does, but SFT has no vLLM): verl toggles it at runtime itself -- ON during
+# training phases (fragmentation control), OFF around vLLM wake/weight-sync
+# (sleep-mode CuMemAllocator conflict). A global export would leak into the
+# vLLM server process and hit exactly that conflict. engine_workers.py:760/805.
+
+python3 -m verl.trainer.main_ppo \
+    algorithm.adv_estimator=grpo \
+    +ray_kwargs.ray_init.object_store_memory=25769803776 \
+    algorithm.use_kl_in_reward=False \
+    data.train_files="${TRAIN_FILE}" \
+    data.val_files="${VAL_FILE}" \
+    data.return_raw_chat=True \
+    data.train_batch_size="${TRAIN_BS}" \
+    data.max_prompt_length="${MAX_PROMPT_LEN}" \
+    data.max_response_length="${MAX_RESP_LEN}" \
+    data.filter_overlong_prompts=False \
+    data.truncation='error' \
+    data.image_patch_size=16 \
+    actor_rollout_ref.model.path="${MODEL_PATH}" \
+    actor_rollout_ref.model.use_remove_padding=True \
+    actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    actor_rollout_ref.model.lora_rank=16 \
+    actor_rollout_ref.model.lora_alpha=32 \
+    actor_rollout_ref.model.target_modules=all-linear \
+    actor_rollout_ref.model.exclude_modules='.*visual.*' \
+    actor_rollout_ref.actor.strategy=fsdp2 \
+    actor_rollout_ref.actor.optim.lr=1e-5 \
+    actor_rollout_ref.actor.optim.lr_scheduler_type=constant \
+    actor_rollout_ref.actor.optim.min_lr_ratio=0.1 \
+    actor_rollout_ref.actor.ppo_mini_batch_size="${TRAIN_BS}" \
+    actor_rollout_ref.actor.use_dynamic_bsz=True \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=24576 \
+    actor_rollout_ref.actor.use_kl_loss=True \
+    actor_rollout_ref.actor.kl_loss_coef=0.001 \
+    actor_rollout_ref.actor.kl_loss_type=low_var_kl \
+    actor_rollout_ref.actor.entropy_coeff=0 \
+    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+    actor_rollout_ref.rollout.name=vllm \
+    actor_rollout_ref.rollout.mode=async \
+    actor_rollout_ref.rollout.max_model_len=$((MAX_PROMPT_LEN + MAX_RESP_LEN)) \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+    actor_rollout_ref.rollout.gpu_memory_utilization="${GPU_MEM_UTIL}" \
+    actor_rollout_ref.rollout.n="${GROUP_SIZE}" \
+    actor_rollout_ref.rollout.load_format=safetensors \
+    actor_rollout_ref.rollout.layered_summon=True \
+    +actor_rollout_ref.rollout.limit_images=112 \
+    '+actor_rollout_ref.rollout.engine_kwargs.vllm.mm_processor_kwargs={max_pixels:150528}' \
+    actor_rollout_ref.rollout.enable_chunked_prefill=True \
+    actor_rollout_ref.rollout.max_num_batched_tokens=24576 \
+    actor_rollout_ref.rollout.free_cache_engine=True \
+    actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=True \
+    actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=24576 \
+    actor_rollout_ref.rollout.val_kwargs.do_sample=False \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0 \
+    actor_rollout_ref.rollout.multi_turn.enable=True \
+    actor_rollout_ref.rollout.multi_turn.format=hermes \
+    actor_rollout_ref.rollout.multi_turn.max_user_turns="${MAX_USER_TURNS}" \
+    actor_rollout_ref.rollout.multi_turn.max_assistant_turns=$((MAX_USER_TURNS + 1)) \
+    actor_rollout_ref.rollout.multi_turn.max_parallel_calls=1 \
+    actor_rollout_ref.rollout.multi_turn.max_tool_response_length=2048 \
+    actor_rollout_ref.rollout.multi_turn.tool_config_path="${REPO}/crop_video_tool.yaml" \
+    actor_rollout_ref.rollout.agent.default_agent_loop=tool_agent \
+    reward.custom_reward_function.path="${REPO}/agentic_tvg/reward.py" \
+    reward.custom_reward_function.name="${REWARD_FN}" \
+    trainer.use_v1=False \
+    trainer.n_gpus_per_node=1 \
+    trainer.nnodes=1 \
+    trainer.logger="${LOGGER}" \
+    trainer.project_name=agentic-tvg \
+    trainer.experiment_name="${EXP_NAME}" \
+    trainer.default_local_dir="${RESULT_DIR}/ckpt" \
+    trainer.rollout_data_dir="${RESULT_DIR}/rollouts" \
+    trainer.validation_data_dir="${RESULT_DIR}/val_rollouts" \
+    data.val_batch_size=2 \
+    trainer.val_before_train=True \
+    +trainer.max_actor_ckpt_to_keep=1 \
+    trainer.save_freq=20 \
+    trainer.test_freq=20 \
+    trainer.total_epochs="${EPOCHS}" \
+    `# ^ THE horizon now (round 2): total_training_steps is left null so verl
+       derives 133 steps/epoch from the 1,068-prompt loader at batch 8.
+       Round 1 inverted this -- epochs=100 as a sentinel with a hardcoded
+       267-step cap -- because cosine needed a fixed denominator. Do not put
+       the sentinel back without also re-pinning STEP_CAP, or the run becomes
+       100 epochs = 13,300 steps.` \
+    "${STEP_CAP[@]}" \
+    "$@" 2>&1 | tee "${RESULT_DIR}/console_$(date +%Y%m%d_%H%M%S).log"
