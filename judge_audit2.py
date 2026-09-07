@@ -8,7 +8,7 @@ pre-2026-09-01 prompt for historical comparison).
 
 Three comparisons per run:
   - vs the live v2 verdicts (looked up in judge_cache_v2.jsonl by the same
-    normalized key judge.py uses) -- the CALIBRATION number. GRPO2_PLAN §3e:
+    normalized key judge.py uses) -- the CALIBRATION number. docs/GRPO_v2_PLAN.md §3e:
     a judge model up-tier is on the table only if this fails (< ~90%).
   - vs the acc recorded in the jsonl (whatever instrument scored the rollout).
   - verdict distributions + every disagreement, for hand-reading.
@@ -135,7 +135,7 @@ def main() -> None:
     if with_live:
         agree = sum(1 for x in with_live if abs(x["auditor"] - x["live_v2"]) < 1e-6)
         print(f"CALIBRATION vs live v2 verdicts: {agree}/{len(with_live)} "
-              f"({agree / len(with_live):.0%})   [<~90% -> consider judge up-tier, GRPO2_PLAN §3e]")
+              f"({agree / len(with_live):.0%})   [<~90% -> consider judge up-tier, docs/GRPO_v2_PLAN.md §3e]")
     else:
         print("CALIBRATION vs live v2: no cache overlap (run the live judge on these rows first)")
     agree_rec = sum(1 for x in ok if abs(x["auditor"] - x["recorded_acc"]) < 1e-6)

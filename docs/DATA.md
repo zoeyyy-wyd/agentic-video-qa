@@ -1,6 +1,6 @@
 # Data Manifest — every row traced to its LongVT source
 
-Companion to `README.md` (the plan) and `prepare_data.sh` (how to fetch).
+Companion to `README.md` (the overview) and `prepare_data.sh` (how to fetch).
 All numbers measured against the released data on 2026-08-25/26. "The paper"
 = LongVT (arXiv:2511.20785).
 
@@ -42,9 +42,10 @@ data_prep/extract_rl.py                          [~2 s, no decoding]
         │  (GRPO training writes rollouts/<step>.jsonl as a side effect)
         ▼
 data_prep/extract_rft.py                         [~10 min; 2,320 crop windows
-  reads : results/grpo-vanilla/rollouts_grpo267/  re-decoded from mp4s]
+  reads : a GRPO run's rollout dumps — the v1     re-decoded from mp4s]
+          build shown here read results/grpo-vanilla/rollouts_grpo267/
           (34,048 trajectories, 266 step files) + rl_train.parquet
-  does  : 1. keep score > 1.5 — with R = 0.5·format + acc + 0.5·IoU this
+  does  : 1. keep score > 1.5 — under the v1 reward R = 0.5·format + acc + 0.5·IoU this
              means "judged correct + format clean + IoU > 0" (11,577 pass);
           2. structural parse: exactly one crop_video call, strict
              <think>/<answer> shape (44 dropped) — 11,533 over 861 questions;
@@ -86,11 +87,12 @@ accepts. The source traces contribute content only.** Concretely, in
    placeholders == assets asserted per row (the rft_9397 incident, §7.2 —
    one stray tag cost a 57-minute SFT run).
 
-A third data product accumulates as a side effect of GRPO itself:
+A third data product accumulates as a side effect of GRPO itself — shown
+here for GRPO v1; GRPO v2's equivalent is `results/grpo-v2/rollouts/`:
 `results/grpo-vanilla/rollouts_grpo267/<step>.jsonl` (renamed from `rollouts/`
 after the run finished — a rerun under the same EXP_NAME overwrites the files
 one by one) — every trajectory the policy generated, with full text and
-per-component rewards. That is the raw pool the stage-3 RFT set was built from
+per-component rewards. That is the raw pool the RFT set was built from
 (`data_prep/extract_rft.py`, §8); nothing needed re-downloading, only the crop
 frames were re-decoded from mp4s already on disk.
 
@@ -103,37 +105,37 @@ system prompt).
 
 | Our file | Size | Composition | LongVT source (role in the paper) |
 |---|---|---|---|
-| `sft_train/sft_val.parquet` | 1,958 rows | 1,358 selftrace traces + 600 geminicot traces; GT + evidence-window metadata from selfqa | `rft_selftrace_15k3` (**stage-3 RFT**) + `sft_geminicot_4k8` (**stage-1 cold start**) + `rl_selfqa_1k6` (**stage-2 RL**, metadata only) |
-| `rl_train.parquet` | 1,068 rows (judge era; difficulty filtering still expected to trim) | selfqa questions disjoint from SFT — no answer-length cut since the LLM judge scores R_acc; GT still expanded to frozen alias lists (judge-unavailable fallback + audit) | `rl_selfqa_1k6` (**stage-2 RL train**) |
-| `rl_val.parquet` | 114 rows | used verbatim | `rl_val_114` (**stage-2 RL val**); zero video overlap with selftrace (verified) |
-| `rft_train/rft_val.parquet` | 2,237 + 49 rows | ≤3 answer-distinct traces × 861 questions, score > 1.5, review-filtered (§8) | **our own GRPO rollouts** (`grpo-vanilla`, 267 steps, 2026-08-28..30) — the first file on this table with no LongVT text in the supervised turns; videos still selfqa mp4s |
+| `sft_train/sft_val.parquet` | 1,958 rows | 1,358 selftrace traces + 600 geminicot traces; GT + evidence-window metadata from selfqa | `rft_selftrace_15k3` (**LongVT RFT**) + `sft_geminicot_4k8` (**LongVT cold-start SFT**) + `rl_selfqa_1k6` (**LongVT RL**, metadata only) |
+| `rl_train.parquet` | 1,068 rows (judge era; difficulty filtering still expected to trim) | selfqa questions disjoint from SFT — no answer-length cut since the LLM judge scores R_acc; GT still expanded to frozen alias lists (judge-unavailable fallback + audit) | `rl_selfqa_1k6` (**LongVT RL train**) |
+| `rl_val.parquet` | 114 rows | used verbatim | `rl_val_114` (**LongVT RL val**); zero video overlap with selftrace (verified) |
+| `rft_train/rft_val.parquet` | 2,237 + 49 rows | ≤3 answer-distinct traces × 861 questions, score > 1.5, review-filtered (§8) | **our own GRPO v1 rollouts** (`results/grpo-vanilla`, 267 steps, 2026-08-28..30) — the first file on this table with no LongVT text in the supervised turns; videos still selfqa mp4s |
 
 These first-column files are all **generated locally** by
 `data_prep/render_traces.py` / `data_prep/extract_rl.py`; the table states
 their provenance, not a download location.
 
-The key deliberate role inversion: **the paper's stage-3 RFT data serves as
-our stage-1 cold start.** It is doubly filtered (answer judged correct AND
+The key deliberate role inversion: **LongVT's RFT data serves as our SFT
+cold start.** It is doubly filtered (answer judged correct AND
 crop-vs-evidence IoU ≥ 0.3), so it is *stronger* per sample than the paper's
 own cold-start mixture — a disclosed confound: RL's marginal gain will read
 smaller than the paper's. In exchange,
-our own stage-3 self-distillation must come from our own rollouts.
+our own RFT self-distillation must come from our own rollouts.
 
 ## 2. Disposition of all 11 LongVT-Parquet files
 
 | File | Rows | Role in the paper | Here |
 |---|---:|---|---|
-| `rft_selftrace_15k3` | 15,354 | stage-3 RFT (their model's successful rollouts) | **SFT backbone**: dedup → 1,290 questions; take 600 × ≤3 traces = 1,379 |
-| `rl_selfqa_1k6` | 1,668 | stage-2 RL train | **RL backbone** (1,068 questions) + SFT metadata (GT, video_segment) |
-| `rl_val_114` | 114 | stage-2 RL val | **eval set**, verbatim |
-| `sft_geminicot_4k8` | 4,881 | stage-1 cold start, Gemini-distilled (paper says 12,766; only 4,881 released) | **SFT supplement**: 600 sampled for question diversity |
-| `sft_tvg_6k3` | 6,395 | stage-1 cold start, Qwen-distilled pure TVG | unused (the TVG line was removed 2026-08-26; traces stay in the annotations download) |
-| `sft_llavacot_54k5` | 54,591 | stage-1 non-tool image CoT | unused (was the cut CoT-mix ablation's pool) |
+| `rft_selftrace_15k3` | 15,354 | LongVT RFT (their model's successful rollouts) | **SFT backbone**: dedup → 1,290 questions; take 600 × ≤3 traces = 1,379 |
+| `rl_selfqa_1k6` | 1,668 | LongVT RL train | **RL backbone** (1,068 questions) + SFT metadata (GT, video_segment) |
+| `rl_val_114` | 114 | LongVT RL val | **eval set**, verbatim |
+| `sft_geminicot_4k8` | 4,881 | LongVT cold-start SFT, Gemini-distilled (paper says 12,766; only 4,881 released) | **SFT supplement**: 600 sampled for question diversity |
+| `sft_tvg_6k3` | 6,395 | LongVT cold-start SFT, Qwen-distilled pure TVG | unused (the TVG line was removed 2026-08-26; traces stay in the annotations download) |
+| `sft_llavacot_54k5` | 54,591 | LongVT cold-start SFT, non-tool image CoT | unused (was the cut CoT-mix ablation's pool) |
 | `sft_openvlthinker_2k8` | 2,829 | ditto | unused |
 | `sft_wemath_602` | 602 | ditto | unused |
-| `sft_videor1_165k5` | 165,575 | stage-1 non-tool video CoT | unused (videos: 128 GiB) |
+| `sft_videor1_165k5` | 165,575 | LongVT cold-start SFT, non-tool video CoT | unused (videos: 128 GiB) |
 | `sft_longvideoreason_5k2` | 5,238 | ditto | unused (videos: 645 GiB) |
-| `sft_longvideoreflection_3k` | 3,004 | **absent from the paper's Table 1**; most plausibly the unlisted multi-round half of the Gemini iMCoTT (54.5% of rows carry 2 crops) | unused — evaluated for injection and rejected 2026-09-01, post-mortem in `V2_PLAN.md` (its crop-1 pinpointing presupposes localisation F=128 cannot supply; RL videos cap at ~302 s) |
+| `sft_longvideoreflection_3k` | 3,004 | **absent from the paper's Table 1**; most plausibly the unlisted multi-turn half of the Gemini iMCoTT (54.5% of rows carry 2 crops) | unused — evaluated for injection and rejected 2026-09-01, post-mortem in `GRPO_v2_PLAN.md` Appendix A (its crop-1 pinpointing presupposes localisation F=128 cannot supply; RL videos cap at ~302 s) |
 
 ## 3. The SFT allocation, derived
 
@@ -188,7 +190,7 @@ averages 2.3 kept traces per question). All knobs live in
 
 ## 4. Against the paper's SFT recipe
 
-The paper's stage-1 cold start totals 247,996 samples; ours takes:
+LongVT's cold-start SFT totals 247,996 samples; ours takes:
 
 | Paper component | Rows | Here |
 |---|---:|---|
@@ -197,7 +199,7 @@ The paper's stage-1 cold start totals 247,996 samples; ours takes:
 | LongVideo-Reason video CoT | 5,238 | 0 |
 | Gemini-distilled tool traces | 12,766 (4,881 released) | **600** |
 | Qwen-distilled TVG traces | 6,395 | 0 (TVG line removed) |
-| — (not in their stage 1) | — | **1,379 selftrace** (their stage-3 data) |
+| — (not in their cold start) | — | **1,379 selftrace** (their RFT data) |
 | **Total** | **247,996** | **1,958** (127× smaller) |
 
 The 125× gap is the project's bet, not an oversight: LoRA on a strong instruct
@@ -208,7 +210,7 @@ question was the cut dose ablation; we now follow the paper and cold-start).
 
 | Archive | GiB | Feeds |
 |---|---:|---|
-| `selfqa_1.zip` | 5.6 | SFT (global view + tool-frame re-decoding for selftrace rows) **and** RL rollouts — same files, both stages |
+| `selfqa_1.zip` | 5.6 | SFT (global view + tool-frame re-decoding for selftrace rows) **and** RL rollouts — same files, both uses |
 | `rl_val_1.zip` | 0.4 | eval |
 | `geminicot_1.zip` + `geminicot_2.zip` | 15.8 | SFT geminicot rows — **deleted 2026-08-27** to make room for GRPO checkpoints. The rendered rows live on in `sft_train.parquet`; re-rendering SFT data needs these back |
 | **Subtotal (+ model 8.3G)** | **~30** | |
@@ -338,25 +340,28 @@ extra_info   : {question, gt_text, video_segment: [10.0, 20.0], duration,
 agent_name   : "tool_agent"                        ← verl multi-turn loop
 ```
 
-Grading: every answer goes to the cached temp-0 Anthropic judge with
-LongVT's rubric {FULL 1.0, PARTIAL 0.5, INCORRECT 0}; without an API key the
+Grading: every answer goes to the cached Anthropic judge (judge v1 or v2 per
+`JUDGE_V`, README "Reward") with LongVT's rubric {FULL 1.0, PARTIAL 0.5,
+INCORRECT 0}; without an API key the
 scorer falls back to on-the-fly rule-alias containment (answer_match.py:
 normalization, parenthetical variants like "stone (rock)", number words).
 
-Scoring (reward.py::compute_score_qa): R = 0.5·format + R_acc(judge)
-+ 0.5·best-IoU(any crop call, video_segment).
+Scoring, v1 (reward.py::compute_score_qa): R = 0.5·format + R_acc(judge)
++ 0.5·best-IoU(any crop call, video_segment); v2 (compute_score_qa2) raises
+the IoU weight to 1.0 — README "Reward".
 
-## 8. Stage-3 RFT set — distilled from our own rollouts (2026-08-31)
+## 8. RFT set — distilled from our own GRPO rollouts (2026-08-31)
 
-Built by `data_prep/extract_rft.py`. The funnel below is the ROUND-1 build
-(outputs `rft_*.parquet`, trained as `results/rft`, outcome neutral —
-README "State"). Since 2026-09-01 the script defaults to round 2's inputs
-and outputs: `--rollouts results/grpo-v2/rollouts`, `--prefix rft_v2` — a
-v2 build cannot overwrite these round-1 files. Two v2 builds exist:
-`rft_v2_*` (score>1.5 + acc=1 gate; 2,633 train) and `rft_v2b_*` (the
-paper's dual criterion acc=1 AND iou≥0.3, ≤4/question; 835 questions →
-2,872 train / 52 val — the shipped RFT ablation, V2_RESULTS §5). All
-numbers below measured on the round-1 build:
+Built by `data_prep/extract_rft.py`. The funnel below is the **v1 build**:
+it reads GRPO v1's dumps, writes `rft_*.parquet`, and was trained as
+`results/rft` (outcome neutral — README "Results"). Since 2026-09-01 the
+script defaults to v2's inputs and outputs (`--rollouts
+results/grpo-v2/rollouts`, `--prefix rft_v2`), so a v2 build cannot
+overwrite the v1 files. Two v2 builds exist: `rft_v2_*` (score>1.5 + acc=1
+gate; 2,633 train) and `rft_v2b_*` (LongVT's dual criterion acc=1 AND
+iou≥0.3, ≤4/question; 835 questions → 2,872 train / 52 val — the shipped
+RFT v2 ablation, GRPO_v2_RESULTS §5). All numbers below are from the v1
+build:
 
 ```
 34,048 trajectories (266 step files × 128 rows: batch 8 prompts × K=16;

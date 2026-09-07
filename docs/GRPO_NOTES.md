@@ -207,20 +207,20 @@ slower and the run last longer. With both pinned, crest ≈ 150G < 179G — step
   ~36G of KV for one sequence, vLLM refuses to start.
 - `truncation=error`: an over-long prompt fails loudly instead of silently.
 
-**Optimizer and horizon** (round-2 form, 2026-09-01; the round-1 form is
-kept below it because grpo-vanilla ran under it)
+**Optimizer and horizon** (v2 form, 2026-09-01; the v1 form is kept below
+it because GRPO v1 ran under it)
 - **constant lr 1e-5** and the horizon is `trainer.total_epochs` (EPOCHS=2
   default; verl derives 133 steps/epoch from the 1,068-prompt loader at
-  batch 8, drop_last). Constant is hygiene, not a lever — the round-1
+  batch 8, drop_last). Constant is hygiene, not a lever — the v1
   plateau was pool saturation, not lr decay (GRPO_v1_RESULTS §4) — but it makes
   the horizon and any resume schedule-free, which the two-stage curriculum
-  (GRPO2_PLAN §3e) relies on. `TOTAL_STEPS` survives as an optional hard cap
+  (GRPO_v2_PLAN §3e) relies on. `TOTAL_STEPS` survives as an optional hard cap
   for short diagnostics and as stage 2's required explicit horizon.
-- Round 1 ran cosine 1e-5 → 1e-6 with `total_epochs=100` as a sentinel and a
+- v1 ran cosine 1e-5 → 1e-6 with `total_epochs=100` as a sentinel and a
   hardcoded `TOTAL_STEPS=267` as the anneal denominator — under cosine a
   resume with a different value makes the lr jump (the scheduler checkpoints
   its step counter; the curve is rebuilt from config). Reproduce with the
-  README's round-1 line; `min_lr_ratio` is inert under constant.
+  README's v1 reproduction line; `min_lr_ratio` is inert under constant.
 
 **KL**
 - `use_kl_loss=True, coef=0.001, low_var_kl`; `use_kl_in_reward=False`. KL in

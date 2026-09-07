@@ -6,7 +6,7 @@ rollouts. A prompt whose visit came back with mean acc >= --threshold is very
 likely to be pure saturation next epoch -- calibrated on round 1, where each
 prompt got one visit per epoch: a >= 0.875 epoch-1 visit was mastered again in
 epoch 2 85% of the time (52% with literally zero acc variance), and a
-0.75-0.875 visit 57% of the time (GRPO_v1_RESULTS §4). Default 0.9 (user call
+0.75-0.875 visit 57% of the time (docs/GRPO_v1_RESULTS.md §4). Default 0.9 (user call
 2026-09-03: keep the 0.75-0.9 band -- its groups still carry variance; only
 the >=0.9 spike is dead weight). Launch stage 2 with run_grpo_stage2.sh,
 which derives EPOCHS/TOTAL_STEPS from disk state.
@@ -19,7 +19,7 @@ Reads acc as recorded in the dump, i.e. whatever judge instrument the run
 used; the threshold is applied on that same scale, so stage 2's cut must be
 computed from stage 1's OWN rollouts, not round 1's (v1-judged) numbers.
 
-Usage (between the two stages -- see GRPO2_PLAN §4):
+Usage (between the two stages -- see docs/GRPO_v2_PLAN.md §4):
   python data_prep/filter_mastered.py \
       --rollouts results/grpo-v2/rollouts --out data/processed/rl_train_ep2.parquet
 It prints the exact EPOCHS/TOTAL_STEPS/TRAIN_FILE line to launch stage 2 with.
@@ -113,7 +113,7 @@ def main() -> None:
           f"kept {int(keep.sum())} incl. {int((acc < 0).sum())} unvisited")
     print(f"-> {args.out} + {sel_path.name}")
     print(f"stage 2 ({n2} steps on the kept pool, resuming past step {max_step}):")
-    print(f"  mv <ckpt>/global_step_{max_step}/data.pt{{,.bak}}   # see GRPO2_PLAN §4 -- MUST precede the resume")
+    print(f"  mv <ckpt>/global_step_{max_step}/data.pt{{,.bak}}   # see docs/GRPO_v2_PLAN.md §4 -- MUST precede the resume")
     print(f"  EPOCHS={epochs2} TOTAL_STEPS={max_step + n2} TRAIN_FILE={args.out} bash run_grpo.sh")
 
 

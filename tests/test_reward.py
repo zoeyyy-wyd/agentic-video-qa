@@ -108,7 +108,7 @@ def test_qa2_differs_from_qa_only_by_the_iou_weight():
 
 
 def test_qa2_keeps_the_format_bonus_not_the_penalty_flip():
-    """GRPO2_PLAN §3b proposed 0/-0.5; kept as +0.5/0 (user call 2026-09-01).
+    """docs/GRPO_v2_PLAN.md §3b proposed 0/-0.5; kept as +0.5/0 (user call 2026-09-01).
 
     A malformed trajectory must score 0 on the format term, never negative --
     the reward range stays [0, 2.5], so no dashboard rescale.

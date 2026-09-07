@@ -35,7 +35,7 @@
 # - engine_kwargs.vllm.mm_processor_kwargs            -> cap profiling dummy images at the real crop
 #   .max_pixels=150528                                   size; without it vLLM profiles 112 images at
 #                                                        the preprocessor default 16.7M px and eats
-#                                                        the whole KV pool (FRAMES_SWEEP.md §5)
+#                                                        the whole KV pool (docs/FRAMES_SWEEP.md §5)
 # - data.val_batch_size=2                             -> loader batch, NOT a row cap:
 #   all 114 val rows still run, two at a time. The val at test_freq=20 fires with
 #   the training state resident (actor + optimizer + vLLM), which is where the
@@ -90,7 +90,7 @@ VAL_FILE=${VAL_FILE:-${REPO}/data/processed/rl_val.parquet}
 # Token budget knobs (frames sweep 2026-08-26: prompt ≈ 27 tok/frame + ~480
 # text/schema, so F=64→2.2K, F=128→3.9K, F=192→5.7K, F=256→7.4K; raise
 # MAX_PROMPT_LEN together with the parquet's nframes).
-# Production values (FRAMES_SWEEP.md §5): F=128 → prompt 4608; C=30 crops
+# Production values (docs/FRAMES_SWEEP.md §5): F=128 → prompt 4608; C=30 crops
 # (3 × ~4.6K worst) + reasoning → response 16384.
 MAX_PROMPT_LEN=${MAX_PROMPT_LEN:-4608}
 MAX_RESP_LEN=${MAX_RESP_LEN:-16384}
@@ -105,7 +105,7 @@ REWARD_FN=${REWARD_FN:-compute_score_qa2}      # round 2: 0.5*format + judge R_a
 # verdicts are never comparable; pass JUDGE_V=1 only to reproduce a v1 number.
 JUDGE_V=${JUDGE_V:-2}
 export JUDGE_V
-GROUP_SIZE=${GROUP_SIZE:-16}                   # K=16 (FRAMES_SWEEP §5; GPU-free, costs wall time)
+GROUP_SIZE=${GROUP_SIZE:-16}                   # K=16 (docs/FRAMES_SWEEP.md §5; GPU-free, costs wall time)
 # prompts/step. 8 x K=16 = 128 trajectories/step. Was 16 (=256 traj) until
 # 2026-08-27, when step 1 died with ray OutOfMemoryError at the vLLM weight
 # sync: the node has 188G of RAM and TaskRunner alone held 95.8G, because every
@@ -117,7 +117,7 @@ GROUP_SIZE=${GROUP_SIZE:-16}                   # K=16 (FRAMES_SWEEP §5; GPU-fre
 # weight sync and the vLLM sleep/wake cycle are fixed costs per step.
 TRAIN_BS=${TRAIN_BS:-8}
 
-# lr: **constant 1e-5 since round 2** (GRPO2_PLAN §3c). Round 1 used cosine
+# lr: **constant 1e-5 since round 2** (docs/GRPO_v2_PLAN.md §3c). Round 1 used cosine
 # decay to 0.1x over TOTAL_STEPS and plateaued from step 180, exactly where lr
 # had fallen below ~3e-6 -- the schedule froze learning in the phase the new
 # reward terms most need it. The 2026-09-01 oscillation analysis (§2) showed
@@ -129,7 +129,7 @@ TRAIN_BS=${TRAIN_BS:-8}
 # strictly apply. Side benefit: TOTAL_STEPS stops being a schedule denominator,
 # so extending or stopping early no longer bends the curve (the round-1 resume
 # footgun below disappears). Collapse fallback (entropy falling fast +
-# grad_norm rising, GRPO_NOTES §4): resume with
+# grad_norm rising, docs/GRPO_NOTES.md §4): resume with
 # `...lr_scheduler_type=cosine ...min_lr_ratio=0.3`.
 #
 # The cosine reasoning below is kept for the round-1 record; min_lr_ratio is
@@ -155,7 +155,7 @@ MAX_USER_TURNS=${MAX_USER_TURNS:-3}
 #     of an anneal. Under round-1's cosine, changing the step count reshaped
 #     the whole curve and a resume under a different value made lr JUMP; that
 #     footgun is gone, and with it the reason to pin the number by hand.
-#   - it tracks the data. Re-splitting SFT/RL (--sft-questions, DATA.md §3)
+#   - it tracks the data. Re-splitting SFT/RL (--sft-questions, docs/DATA.md §3)
 #     changes the prompt pool, and 2 epochs stays 2 epochs instead of silently
 #     becoming 1.7 or 2.4 while the constant says 267.
 # Headroom says there is something to find: at the SFT start the format term is
@@ -230,7 +230,7 @@ plot_curves() {
 trap plot_curves EXIT
 
 # glibc allocator. These two are the fix for the three CPU OOMs of 2026-08-27
-# (GRPO_NOTES.md 6); do not drop them. glibc's mmap threshold is dynamic: every
+# (docs/GRPO_NOTES.md §3); do not drop them. glibc's mmap threshold is dynamic: every
 # time an mmap'd block is freed the threshold rises to that block's size (32MB
 # ceiling) and never comes back down. This project's allocation sizes sit right
 # in that range -- 588KB per frame, 52MB per crop tensor -- so one free pins it

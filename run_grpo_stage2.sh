@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stage-2 GRPO entry point: resume past the stage-1 checkpoint on the pruned
-# pool (epoch-boundary curriculum, GRPO2_PLAN §3e). Thin wrapper over
+# pool (epoch-boundary curriculum, docs/GRPO_v2_PLAN.md §3e). Thin wrapper over
 # run_grpo.sh — same trainer, same defaults; only the horizon math and the
 # dataloader-state surgery live here, both derived from disk state so the
 # launch line cannot go stale:

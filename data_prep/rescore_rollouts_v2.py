@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Re-score dumped rollouts under the round-2 instrument + reward, and save.
 
-Purpose: the endgame comparison (GRPO2_PLAN §5) is a 3-checkpoint mean vs
+Purpose: the endgame comparison (docs/GRPO_v2_PLAN.md §5) is a 3-checkpoint mean vs
 3-checkpoint mean on ONE scale. Round-1's val dumps carry v1-judged acc from
 rollout time; this re-grades the SAME answers with the live v2 judge (verdicts
 cache into judge_cache_v2.jsonl like any other v2 verdict -- re-runs are free)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stage-3 RFT entry point: SFT on the merged GRPO model over the policy's own
-# filtered rollouts (data recipe: DATA.md §8; build: data_prep/extract_rft.py).
+# filtered rollouts (data recipe: docs/DATA.md §8; build: data_prep/extract_rft.py).
 #
 # Deliberately a thin wrapper: RFT *is* the run_sft.sh machinery — same
 # trainer, LoRA config, loss mask — and duplicating the torchrun block here

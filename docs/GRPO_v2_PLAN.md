@@ -1,33 +1,37 @@
-# GRPO Round 2 Plan — `grpo_v2` (2026-09-01; rewritten same day after the group-level analysis, all §3 changes implemented)
+# GRPO v2 Plan — design record for the `grpo_v2` recipe (2026-09-01)
 
-**OUTCOME (2026-09-05, full results in `V2_RESULTS.md`):** ran as designed.
-Primary criterion: closing 3-mean acc 0.6214 vs baseline 0.6023 — **positive
-(+1.9 pt) but short of the 1-SE clean-win bar**. The observable-only lines
-overdelivered: evidence_iou 0.254 (terminal 0.269) broke v1's 0.21 plateau
-and transferred externally (Charades R@0.5 +15.1 vs SFT). Curriculum and
-saturation behaved as §3e predicted; RFT stayed neutral (×5). This file is
-now a historical design record — read V2_RESULTS.md for what happened.
+**Status: executed as designed, 2026-09-01..04.** Outcome in one line:
+closing 3-checkpoint mean acc 0.6214 vs GRPO v1's 0.6023 — positive
+(+1.9 pt) but short of the 1-SE clean-win bar set in §5; evidence_iou 0.254
+(terminal 0.269) broke v1's 0.21 plateau and transferred to Charades-STA
+(R@0.5 +15.1 vs SFT); curriculum and saturation behaved as §3e predicted;
+RFT v2 stayed neutral. Full results and analysis: `GRPO_v2_RESULTS.md`.
+This file is the design record — what v2 changed, and the evidence each
+change rested on before launch.
 
-Design for the second GRPO run: **same start model as round 1
-(`results/sft-mix/merged`), judge v2 as the one real reward change, an
-epoch-boundary curriculum against pool saturation, constant lr as hygiene.**
-Evidence base: `GRPO_v1_RESULTS.md` (round-1 forensics; its §4 group-level
-saturation analysis, added 2026-09-01, is what reshaped this plan) and
-`GRPO_NOTES.md` (mechanics). Two earlier routes were measured and dropped —
-their post-mortems live where the evidence is:
+**The v2 recipe in one sentence:** same start model as v1
+(`results/sft-mix/merged`); judge v2 as the one real reward change; an
+epoch-boundary curriculum against pool saturation; constant lr as hygiene.
+v1 / v2 and the stage 1 / stage 2 convention are defined in the README
+("Versions").
 
-- **rft2 / SFT2 with reflection-data injection** (this file's first draft,
-  then V2_PLAN's variant): abandoned. `V2_PLAN.md` holds the post-mortem —
-  the injected traces presuppose localisation the 128-frame budget cannot
-  supply, and the RL pool's ≤302s videos make multi-crop unprofitable anyway.
-- **"the plateau was the cosine lr"** (this file's first §3c): withdrawn.
-  Learning speed vs lr is non-monotonic across round 1's phases and the
-  plateau tracks pool saturation instead (GRPO_v1_RESULTS §4).
+Evidence base: `GRPO_v1_RESULTS.md` (v1 forensics; its §4 group-level
+saturation analysis is what shaped this plan) and `GRPO_NOTES.md`
+(mechanics). Two routes were considered and dropped before launch:
 
-## 1. What round 1 established
+- **Re-running SFT with LongVT's 2-crop reflection traces injected, then
+  GRPO from that model.** Abandoned on measurement: the injected traces
+  presuppose localisation the 128-frame budget cannot supply, and the RL
+  pool's ≤302 s videos make a second crop unprofitable anyway. Post-mortem:
+  Appendix A.
+- **"The v1 plateau was the cosine lr decay."** Withdrawn: learning speed
+  vs lr is non-monotonic across v1's phases, and the plateau tracks pool
+  saturation instead (`GRPO_v1_RESULTS.md` §4).
 
-Round 1 (`grpo-vanilla`, 267 steps) worked but plateaued: val acc
-0.456 → 0.50–0.55 band from step 180, evidence_iou stuck at ~0.21, policy
+## 1. What v1 established
+
+GRPO v1 (`results/grpo-vanilla`, 267 steps) worked but plateaued: val acc
+(v1 scale) 0.456 → 0.50–0.55 band from step 180, evidence_iou stuck at ~0.21, policy
 converged to exactly one crop per trajectory (cap allows 3).
 
 - **The plateau is pool saturation.** Groups the policy has mastered
@@ -52,9 +56,9 @@ converged to exactly one crop per trajectory (cap allows 3).
   the ranking at any positive weight (§3b), and the policy still plateaued
   at 0.21.
 - **One crop bounds iou** (31/114 val prompts iou ≡ 0 at all 13
-  checkpoints), and multi-crop is out of scope for this round (§3d).
+  checkpoints), and multi-crop is out of scope for v2 (§3d).
 
-## 2. What round 1 ruled out: lr and batch as stability knobs
+## 2. What v1 ruled out: lr and batch as stability knobs
 
 The train-reward sawtooth (step-to-step std 0.11–0.18) is **sampling noise
 from 8 prompts/step, not lr instability**. Two independent proofs
@@ -70,14 +74,14 @@ from 8 prompts/step, not lr instability**. Two independent proofs
 Consequences: don't chase the sawtooth with lr or batch changes; read the
 train curve as a 20-step moving average. Optimization health is judged by
 grad_norm (smooth 0.05–0.075), entropy (smooth decline, no collapse), and
-the val curve — all clean in round 1. Keep `TRAIN_BS=8`, `GROUP_SIZE=16`
+the val curve — all clean in v1. Keep `TRAIN_BS=8`, `GROUP_SIZE=16`
 (K is the within-group baseline reliability and must not shrink;
 GRPO_NOTES §4; RAM ceiling rules out larger batch anyway).
 
 Scope note: this section rules lr out as the *oscillation* driver. It says
 nothing about the plateau — that attribution question is settled separately
 by the phase-slope + saturation measurements in GRPO_v1_RESULTS §4 (also not
-lr). "Raise the lr" is contraindicated by the same table: round 1's
+lr). "Raise the lr" is contraindicated by the same table: v1's
 highest-lr phase was its slowest-learning phase. A 30-step probe recipe for
 a higher-lr cosine exists in the session notes if that is ever revisited;
 it buys speed-to-plateau at best, not a higher plateau.
@@ -86,15 +90,15 @@ it buys speed-to-plateau at best, not a higher plateau.
 
 This is a **recipe-level comparison, not a single-axis ablation**: judge v2
 + constant lr + the epoch-boundary curriculum all change together, so
-`grpo_v2` vs `grpo-vanilla` reads as "recipe v2 vs v1". Accepted knowingly —
+GRPO v2 vs GRPO v1 reads as "recipe v2 vs recipe v1". Accepted knowingly —
 the three changes point the same way and none is worth 60h of isolation.
-The start model is shared with round 1, so round 1's +9 pt is inherited,
+The start model is shared with v1, so v1's +9 pt is inherited,
 not re-earned.
 
-Effect sizes, measured by re-scoring round 1's own 34,048 trajectories
+Effect sizes, measured by re-scoring v1's own 34,048 trajectories
 (GRPO_v1_RESULTS §4 "Pre-flight"): judge v2 reorders within-group advantage at
 Spearman 0.874 / 22.8% of groups change their best trajectory; the iou
-re-weight 0.992 / 3.1%. **Round 2 is a judge round**; the curriculum's job
+re-weight 0.992 / 3.1%. **v2 is a judge change first**; the curriculum's job
 is to keep the signal alive long enough for that to matter.
 
 ### 3a. Judge v2 — DONE, and now the code default
@@ -112,9 +116,9 @@ instrument is recorded in every console log. `JUDGE_V=1` reproduces v1
 numbers. v1/v2 verdicts are never comparable; quote every acc with its
 instrument version.
 
-**v2 baselines already measured** (114-row rl_val, v1 in parens):
-SFT 0.5395 (0.4561) · **GRPO 0.5965 (0.5044)** · RFT 0.5702 (0.5044).
-Extended 2026-09-03: round-1's closing THREE checkpoints (240/260/267)
+**v2-scale baselines already measured** (114-row rl_val, v1 scale in parens):
+SFT 0.5395 (0.4561) · **GRPO v1 0.5965 (0.5044)** · RFT v1 0.5702 (0.5044).
+Extended 2026-09-03: v1's closing three checkpoints (240/260/267)
 re-judged on v2 and re-scored under the qa2 reward —
 `data_prep/rescore_rollouts_v2.py`, artifact
 `results/grpo-vanilla/v2_rescore.json`: acc_v2 0.6228 / 0.5921 / 0.5921,
@@ -125,7 +129,7 @@ the reason the endgame compares 3-point means.)
 What v2 buys, precisely: **ranking correctness, not gradient magnitude.**
 The 0.5 refuge was noise in both directions, so mid-difficulty groups were
 partly ranked by judge noise; v2 replaces that with a decision. It does not
-relieve saturation — simulated on round 1's rollouts it *raises* the
+relieve saturation — simulated on v1's rollouts it *raises* the
 zero-acc-variance share (21.4% → 26.9% in the last band) because 15×FULL +
 1×PARTIAL groups collapse to 16×FULL. The curriculum (§3e) is what
 addresses saturation.
@@ -147,15 +151,15 @@ return, with first-verdict-wins enforced at load. Under the async agent
 loop each worker previously saw only its own verdicts plus the file as of
 its first load — the cold-cache step-0 val duplicated 47% of its judge
 calls (146/309). Residual duplication window is one in-flight API call
-(round-1's ~0.1% regime). judge.py (v1) is deliberately untouched — frozen
+(v1's ~0.1% regime). judge.py (judge v1) is deliberately untouched — frozen
 instrument. Regression tests: `tests/test_judge_cache.py`.
 
 ### 3b. Reward `compute_score_qa2` — DONE, smaller than first drafted
 
 `R = 0.5·format + judge_acc + TIME_WEIGHT_V2 · evidence_iou`, with
-`TIME_WEIGHT_V2 = 1.0` (round 1: 0.5). Range [0, 2.5] — the score scale is
-not comparable across rounds; everything else about the dict (keys, val
-metrics) is unchanged. `compute_score_qa` is frozen for round-1
+`TIME_WEIGHT_V2 = 1.0` (v1: 0.5). Range [0, 2.5] — the score scale is
+not comparable across versions; everything else about the dict (keys, val
+metrics) is unchanged. `compute_score_qa` is frozen for v1
 reproduction (with `JUDGE_V=1`).
 
 Two things the first draft asked for are deliberately absent:
@@ -164,7 +168,7 @@ Two things the first draft asked for are deliberately absent:
   2026-09-01). It is a uniform constant shift; GRPO's group-normalized
   advantage is exactly invariant to it. The bonus form stays and the reward
   floor stays 0.
-- **The multi-crop shaping term**: dropped with its enabler (§3d). Round 1
+- **The multi-crop shaping term**: dropped with its enabler (§3d). v1
   sampled 22 multi-crop trajectories in 34,048, so it would be ≡ 0.
 
 On the weight itself, measured (GRPO_v1_RESULTS §4): near-inert — within-group
@@ -178,7 +182,7 @@ and no iou target hangs on it (§5).
 ### 3c. lr schedule: constant — hygiene, not a lever
 
 Constant 1e-5 (verl's default; run_grpo.sh sets it since 2026-09-01).
-Why it is safe: round 1 ran ~50 steps at 1e-5 with its lowest grad_norm
+Why it is safe: v1 ran ~50 steps at 1e-5 with its lowest grad_norm
 (0.051) and gentlest entropy slope; entropy ended at 0.84 with the fastest
 observed decline only −0.147/100 steps — far from collapse. Why it is
 *only* hygiene: the plateau is saturation, not step size (§1), so no
@@ -192,15 +196,15 @@ fall + grad_norm sustained rise): resume the latest checkpoint with
 `actor_rollout_ref.actor.optim.lr_scheduler_type=cosine
 actor_rollout_ref.actor.optim.min_lr_ratio=0.3`.
 
-### 3d. Multi-crop: out of scope for round 2
+### 3d. Multi-crop: out of scope for v2
 
 The data-injection enabler (mixing `sft_longvideoreflection_3k` 2-crop
 traces into SFT/RFT) was abandoned 2026-09-01 after measurement —
-`V2_PLAN.md` has the full post-mortem. The short version: those traces
+Appendix A has the full post-mortem. The short version: those traces
 pinpoint a median 7 s window on ~944 s videos (a 124× narrowing; only
 9/1,562 start coarse) — a move our 128-frame global view (7.4 s/frame
 there) gives the model no evidence for — while the RL pool tops out at
-302 s, where the first crop is usually right and round 1 rationally
+302 s, where the first crop is usually right and v1 rationally
 extinguished second crops (22 sampled, mean score below group mean). The
 prompt-nudge fallback goes with it (it would change the train+val prompt
 distribution for a behaviour with no payoff in-pool).
@@ -210,7 +214,7 @@ distribution for a behaviour with no payoff in-pool).
 multi-crop out of scope, re-freezing single-crop in a future RFT pass is
 consistent, and the parse is one line to relax if scope changes.
 
-### 3e. Epoch-boundary curriculum — ADOPTED (was: deferred to round 3)
+### 3e. Epoch-boundary curriculum — ADOPTED (the first draft deferred it to a later version)
 
 The direct counter to §1's saturation. Run epoch 1 on the full 1,068-prompt
 pool, then drop the prompts the policy has mastered and run epoch 2 on the
@@ -218,7 +222,7 @@ rest. The first draft deferred this as "changes the data axis; also epoch
 math"; the horizon is per-epoch now, so the epoch-math objection is void,
 and the data-axis objection is subsumed by the recipe-level framing (§3).
 
-Calibration on round 1 (each prompt visited once per epoch; 1,044 prompts
+Calibration on v1 (each prompt visited once per epoch; 1,044 prompts
 with both visits): a single 16-rollout visit predicts next-epoch saturation
 well —
 
@@ -301,7 +305,7 @@ average).
      acc should land ≈ **0.5395** (SFT model on the v2 instrument). A big
      miss is judge wiring, not the model — that one IS worth killing the
      run for, and it shows within the first ~20 min.
-   - by the step-20/40 vals, sanity against round 1's opening: entropy
+   - by the step-20/40 vals, sanity against v1's opening: entropy
      slope ≈ −0.10/100 with grad_norm ~0.05 (much steeper + climbing
      grad_norm = §3c collapse signature → stop, fall back), format
      0.487–0.5, response_length ~3.2K flat. Train score is on the
@@ -315,17 +319,17 @@ average).
    after verifying. Checkpoint reads via `score_rollouts.py` /
    `analyze_rollouts.py` (val-rft analysis is the worked example).
 6. **Final numbers**: VideoSIAH-Eval via `run_benchmark.sh` (~109G streamed
-   in chunks, ~6–11h/model) for grpo_v2's final checkpoint AND
-   grpo-vanilla (never run yet) — same judge version on both. Report it as
+   in chunks, ~6–11h/model) for GRPO v2's final checkpoint AND
+   GRPO v1 (never run yet) — same judge version on both. Report it as
    an out-of-budget transfer benchmark: its videos average 1,688 s against
-   our ≤302 s training regime and 128-frame view (V2_PLAN post-mortem, §2).
-7. **Stage-3 decision** (rft_v2): only if grpo_v2's rollouts look worth
+   our ≤302 s training regime and 128-frame view (Appendix A).
+7. **RFT decision** (rft_v2): only if GRPO v2's rollouts look worth
    distilling; `extract_rft.py` defaults already point at
    `results/grpo-v2/rollouts` with the `rft_v2` prefix, `run_rft.sh` at
    `results/grpo-v2/merged`.
 
 All RAM/plasma/glibc settings unchanged — the ladder is solved, don't
-touch it. Checkpoint transient is 2×17G; with 87G free the round-1 ENOSPC
+touch it. Checkpoint transient is 2×17G; with 87G free the v1-era ENOSPC
 mitigations are unnecessary.
 
 ## 5. Success criteria and monitoring
@@ -333,8 +337,8 @@ mitigations are unnecessary.
 Targets (val, v2-judge scale, vs the §3a baselines; n=114 → SE ±4.7 pts,
 so compare 3-checkpoint means, never single readings):
 
-- **Primary: grpo_v2's closing 3-checkpoint mean acc_v2 above
-  grpo-vanilla's measured 3-checkpoint mean 0.6023** (rescored 2026-09-03,
+- **Primary: GRPO v2's closing 3-checkpoint mean acc_v2 above
+  GRPO v1's measured 3-checkpoint mean 0.6023** (rescored 2026-09-03,
   `results/grpo-vanilla/v2_rescore.json`) **by a clear margin (~1 SE,
   ±4.7 single-point)** — i.e. ≥ ~0.65 for a clean win; matching ~0.60 is a
   wash. reward_v2 comparison anchor: 1.319. Expected mechanism: cleaner
@@ -344,13 +348,13 @@ so compare 3-checkpoint means, never single readings):
   the step-0 val and the step-20/40 reads (§4.3) are the first scheduled
   looks; then at the stage boundary and mid-stage-2, run
   `analyze_groups.py --signal` on the live `rollouts/` — stage 2's
-  mastered share should sit well below round 1's late-run 29.5% (the §3e
+  mastered share should sit well below v1's late-run 29.5% (the §3e
   counterfactual says ~5% at the boundary). If it climbs back fast, the
   pool is smaller than the policy's learning rate — early-stop on the val
   plateau rather than re-cutting mid-stage.
 - **Observables, no targets**: evidence_iou (capability-bound at ~0.21;
   any rise is upside), num_tool_calls (≡1.0 expected — §3d).
-- **Mechanism check** (`analyze_rollouts.py` taxonomy vs grpo-vanilla's
+- **Mechanism check** (`analyze_rollouts.py` taxonomy vs GRPO v1's
   val dump): acc gains should come with the "wrong & un-grounded" cell
   shrinking or stable — shrinking into "grounded & correct" would be
   grounding improving as a side effect; growing would mean priors-only
@@ -362,10 +366,83 @@ Guard rails while running:
   §3c fallback (checkpoints every 20 steps bound the loss).
 - `response_length/mean` leaving its ~3.2K flatline = hacking / plasma
   early-warning (GRPO_NOTES §3b).
-- format_score mean should stay ≈ 0.487–0.5 as in round 1 (bonus form
+- format_score mean should stay ≈ 0.487–0.5 as in v1 (bonus form
   unchanged).
 - train reward: read the 20-step EMA only (§2); note the [0, 2.5] scale —
-  round-1 dashboards don't transfer.
+  v1 dashboards don't transfer.
 - the `[recipe]` console line is the instrument record: EXP_NAME,
   REWARD_FN, JUDGE_V, MODEL_PATH, TRAIN_FILE, EPOCHS per launch — check
   it at every (re)start, especially that stage 2 shows the ep2 parquet.
+
+## Appendix A. The reflection-injection route — measured and dropped (2026-09-01)
+
+Before v2 was designed, the candidate plan was to **re-run SFT with
+`sft_longvideoreflection_3k`'s 2-crop traces injected, then run GRPO from
+that model**, so that the multi-crop behaviour v1 never showed would be
+available to RL. It was abandoned the day it was drafted, on the
+measurements below, before anything ran; v2 kept SFT unchanged (§3) and
+changed only the incentive and curriculum side. Recorded here because the
+same measurements fix this project's scope: it is a ≤~300 s-video system.
+
+### A.1 What the reflection file is
+
+`sft_longvideoreflection_3k` (3,004 rows) is absent from the LongVT paper's
+Table 1 — every other released parquet maps onto a table line, and
+228,835 + 19,161 = 247,996 closes without it. It is most plausibly the
+unlisted multi-turn portion of the 12,766 Gemini-distilled iMCoTT (4,881
+single-turn rows were released as `geminicot`; 4,881 + 3,004 = 7,885 of
+12,766): same system prompt, tool schema and "The video path…" user suffix;
+zero video or question overlap with geminicot; id family
+`longvideo_sft_4k_*`. The paper's §3.2 length-adaptive multi-turn rule is
+visible in the data — the 2-crop share rises 36.5% → 100% as video length
+crosses ~1,200 s, and geminicot's videos are median ~89 s vs reflection's
+~788 s: the two files are the short- and long-video halves of one pipeline.
+
+Structure: 1,367 single-crop rows (5 messages) + 1,637 two-crop rows
+(7 messages); tool responses come back as `user`-role messages with no
+timestamps (frames as image_url entries, ~1 fps, jpgs in archives we do not
+download). 642 videos; the 2-crop subset spans 330 videos / 1,562 parseable
+rows.
+
+### A.2 Why injection lost — three measurements
+
+**(a) The traces presuppose localisation our frame budget cannot supply.**
+Most 2-crop traces are genuine local refinement: 79.6% of window pairs
+overlap, crop 2 is typically *wider* (median 24 s vs crop 1's 7 s), 69% of
+second thinks cite a timestamp seen inside crop 1 and place crop 2 within
+±15 s of it, and far jumps (gap > 60 s) are 5.5%. The disqualifier is the
+**first** crop: median 0.8% of the video — a 124× narrowing (only 9/1,562
+traces start coarse) on videos of median ~944 s, where our F=128 global
+view is one frame per ~7.4 s. The generator had per-segment captions; our
+model at inference has ~1 global frame inside that window. Training on this
+supervises confidently pinpointing without evidence — direct downward
+pressure on the iou line.
+
+**(b) The RL pool cannot pay for a second crop.** The selfqa / rl_val videos
+(HACS 1,498 + Ego4D-NaQ 170) are 3 fps transcodes of 447 / 615 / 903 frames
+— ≈149 / 205 / 301 s, hard-capped at ~302 s (max GT-window end 302 s; zero
+rows beyond 600 s). At 302 s, F=128 gives ~10 in-window global frames
+(median; FRAMES_SWEEP.md §4), so the first crop is usually right, a second
+crop buys no IoU and costs tokens, and v1's extinction of multi-crop (22
+sampled attempts, mean score below group mean, 20 → 2 over the run) was the
+reward working correctly, not a prior-mass accident. An SFT-injected
+behaviour would be re-extinguished for the same reason.
+
+**(c) The scope decision.** VideoSIAH-Eval (the shipping benchmark)
+averages 1,688 s — reflection's regime, not ours. A crop must be narrower
+than 1/4.27 of the video to beat the global view's frame density (128/30),
+so long-video capability at F=128 requires learned hierarchical descent
+(≈4.27× narrowing per call, ~78× over 3 calls) — a behaviour no released
+file teaches (the reflection traces do not: see (a)). F=512 was measured
+infeasible on this box (FRAMES_SWEEP.md §3: >180 GB host RAM, >30 min/step).
+Decision: **this project is a ≤~300 s-video system**, matching its RL data;
+VideoSIAH-Eval is treated as an out-of-budget transfer benchmark and was not
+run (GRPO_v2_RESULTS.md §6).
+
+Incidental but recorded: video-id overlap reflection × selfqa and × rl_val
+is zero (measured 2026-09-01), so the injection would have been leak-clean;
+the fetch plan (byte-range from ZIP_STORED entries, ~10 GiB / 70 videos /
+456 traces) was sound; `data/processed/reflection_video_map.json` was lost
+in the 2026-09-01 machine wipe and would need re-deriving from the Hub
+listing if this is ever revisited; `render_traces.py` remains single-window
+— the N-crop extension was never written.

@@ -138,7 +138,7 @@ from agentic_tvg.answer_match import answer_matches, expand_aliases, parse_answe
 
 TIME_WEIGHT = 0.5  # lambda on the evidence-IoU term; 0 disables it (cut ablation)
 
-# Round 2 (GRPO2_PLAN §3b): iou is the plateaued target, so its term doubles.
+# Round 2 (docs/GRPO_v2_PLAN.md §3b): iou is the plateaued target, so its term doubles.
 # Calibration measured offline on round 1's own 34,048 rollouts (2,128 complete
 # 16-groups, results/grpo-vanilla/rollouts_grpo267): raising 0.5 -> 1.0 leaves
 # the within-group advantage ranking at Spearman 0.992 and changes the winning
@@ -254,7 +254,7 @@ def compute_score_qa2(
     extra_info: dict | None = None,
     **kwargs,
 ) -> dict:
-    """Round-2 QA reward (GRPO2_PLAN §3b as revised 2026-09-01).
+    """Round-2 QA reward (docs/GRPO_v2_PLAN.md §3b as revised 2026-09-01).
 
     Exactly compute_score_qa with TIME_WEIGHT_V2 = 1.0 on the IoU term.
     Two things the drafted §3b asked for are deliberately NOT here:

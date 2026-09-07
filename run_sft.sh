@@ -43,7 +43,7 @@ set +x; source "${REPO}/env_setup/preflight.sh"; set -x
 
 MODEL_PATH=${MODEL_PATH:-${REPO}/models/Qwen3-VL-4B-Instruct}
 # Global-view frame knob. 128 is the production value (2026-08-26, was 64;
-# coverage + sweep evidence in FRAMES_SWEEP.md) and MUST match the rendered
+# coverage + sweep evidence in docs/FRAMES_SWEEP.md) and MUST match the rendered
 # data + system prompt (constants.GLOBAL_NUM_FRAMES) -- override only for
 # memory-ceiling tests. Pixel budgets scale with it (whole-video budgets).
 GLOBAL_FRAMES=${GLOBAL_FRAMES:-128}

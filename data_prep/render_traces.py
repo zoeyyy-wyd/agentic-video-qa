@@ -85,7 +85,7 @@ def strip_mm_tags(s: str) -> str:
     literal one inside a <think> block is counted as a real image placeholder
     and shifts the whole images list off by one -> IndexError, mid-epoch, in a
     dataloader worker. Exactly 1 of the 15,354 selftrace traces has one
-    (rft_9397); it cost a 57-minute run on 2026-08-26. See DATA.md §7.2.
+    (rft_9397); it cost a 57-minute run on 2026-08-26. See docs/DATA.md §7.2.
     """
     return MM_TAG_RE.sub("", s)
 
@@ -192,7 +192,7 @@ def main() -> None:
     ap.add_argument("--geminicot-n", type=int, default=600, help="geminicot traces mixed in (0 = pure selftrace)")
     # default 999 since 2026-08-26: R_acc is judged by the LLM judge (reward.py/
     # judge.py), which scores long answers too, so the pool no longer needs the
-    # matcher-verifiability cap. 6 was the matcher-era value (DATA.md).
+    # matcher-verifiability cap. 6 was the matcher-era value (docs/DATA.md).
     ap.add_argument("--max-gt-words", type=int, default=999, help="normalized GT length cap for 'verifiable'")
     ap.add_argument("--val-frac", type=float, default=0.02)
     ap.add_argument("--seed", type=int, default=0)

@@ -28,7 +28,7 @@ traces come from OUR OWN rollouts, so the first assistant turn is kept
 verbatim (the model's own <think> + tool_call bytes, not a canonical
 re-render) and the tool message carries the logged response text. Only
 <image>/<video> literals are scrubbed from model-authored text (the rft_9397
-lesson, DATA.md §7.2). Prompts are rebuilt from agentic_tvg.prompts with the
+lesson, docs/DATA.md §7.2). Prompts are rebuilt from agentic_tvg.prompts with the
 duration from rl_train.parquet -- the same value the RL tool was created with
 -- and the row's `input` is required to contain that rendered duration.
 
@@ -183,7 +183,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     # Round 2 default (2026-09-01). During a run verl writes results/<run>/rollouts/;
     # round 1's were renamed to rollouts_grpo267/ afterwards so a rerun under the
-    # same EXP_NAME could not overwrite them file by file (DATA.md §0.5). Point
+    # same EXP_NAME could not overwrite them file by file (docs/DATA.md §0.5). Point
     # this at whichever name the finished run left behind.
     ap.add_argument("--rollouts", type=Path, default=Path("results/grpo-v2/rollouts"))
     ap.add_argument("--rl-train", type=Path, default=Path("data/processed/rl_train.parquet"))

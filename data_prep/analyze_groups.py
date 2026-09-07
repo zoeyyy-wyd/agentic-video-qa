@@ -8,7 +8,7 @@ advantage is defined over. Two questions:
 1. `--signal`: does the within-group signal survive the run? Per step band:
    the share of groups the policy has mastered, the share with zero acc
    variance, and the mean within-group reward spread. A pool that saturates
-   loses gradient even while lr, batch and K are untouched (DATA.md §3
+   loses gradient even while lr, batch and K are untouched (docs/DATA.md §3
    predicted exactly this failure mode for the 1,068-prompt pool).
 
 2. `--metrics metrics.csv`: learning speed against lr. Fits the slope of

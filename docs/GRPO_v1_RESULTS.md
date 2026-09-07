@@ -1,10 +1,11 @@
-# GRPO v1 Results — `grpo-vanilla` (2026-08-30)
+# GRPO v1 Results — `results/grpo-vanilla` (2026-08-30)
 
-> Sequel: the v2 recipe's results live in `V2_RESULTS.md` (2026-09-05).
+> Sequel: GRPO v2's results live in `GRPO_v2_RESULTS.md` (2026-09-05).
+> v1 / v2 are defined in the README ("Versions").
 
-Analysis of the production GRPO run (`run_grpo.sh`, config rationale in
-`GRPO_NOTES.md`, budgets in `FRAMES_SWEEP.md` §5). §§1–7 were written at step
-243 of 267. The run finished 267/267 on 2026-08-30 — after one more host-RAM
+Analysis of the GRPO v1 run (`run_grpo.sh` with the v1 settings — README
+"Run"; config rationale in `GRPO_NOTES.md`, budgets in `FRAMES_SWEEP.md`
+§5). §§1–7 were written at step 243 of 267. The run finished 267/267 on 2026-08-30 — after one more host-RAM
 OOM during step 267 and a resume from `global_step_260` — final checkpoint
 `ckpt/global_step_267`, pushed to HF `zoeyyy-wyd/agentic-tvg-grpo-final`.
 §8 (post-run) analyses the two closing validations and the final dip.
@@ -148,7 +149,7 @@ Two refinements to the paragraph above this one:
 
 ### The late plateau is signal exhaustion, not the lr schedule
 
-`GRPO2_PLAN.md` §3c attributed the step-180 plateau to cosine decay carrying
+The first draft of `GRPO_v2_PLAN.md` §3c attributed the step-180 plateau to cosine decay carrying
 lr below ~3e-6. Learning speed against lr, fitted per phase from
 `metrics.csv`, does not support that:
 
@@ -167,7 +168,7 @@ than it. If lr level set the pace, phase 1 would lead. Two readings follow:
 2. **Constant lr is hygiene, not a lever.** Worth keeping (it is verl's
    default and it removes TOTAL_STEPS as the anneal denominator, which
    matters now that the horizon is set in epochs) but it should not be
-   expected to unfreeze the plateau. GRPO2_PLAN §3c was rewritten to this
+   expected to unfreeze the plateau. GRPO_v2_PLAN §3c was rewritten to this
    framing the same day.
 
 Entropy slope is read only alongside the score slope, never alone: it
@@ -176,9 +177,9 @@ usefully. The two agree here (both peak in phase 2, both stall in phase 3),
 which establishes "the policy stopped moving" — and the saturation table
 above is what establishes *why*.
 
-### Pre-flight: which round-2 reward change actually reorders anything
+### Pre-flight: which v2 reward change actually reorders anything
 
-Re-scoring round 1's own 34,048 trajectories under candidate rewards, and
+Re-scoring v1's own 34,048 trajectories under candidate rewards, and
 comparing the within-group advantage vectors (rho = Spearman, "top flips" =
 share of groups whose best trajectory changes):
 
@@ -191,7 +192,7 @@ share of groups whose best trajectory changes):
 
 The judge rubric is worth ~7× the planned IoU re-weight, and matching it on
 weight alone would take TIME_WEIGHT ≈ 5.0 — i.e. letting a perfectly grounded
-wrong answer outrank a correct ungrounded one. **Round 2 is a judge round.**
+wrong answer outrank a correct ungrounded one. **v2 is a judge change first.**
 
 The judge row is a simulation (PARTIAL reassigned at the 11:5 split the
 2026-09-01 opus audit measured, three seeds, spread < 1 pt); real v2 verdicts
@@ -276,7 +277,7 @@ is the known plasma/DataProto RAM ladder (GRPO_NOTES §3).
 were written before the pool-saturation trend was measured; re-ranked by
 measured effect size:
 
-- **4 is the whole round.** Done as judge v2 (sonnet + question-anchored
+- **4 is the whole of v2.** Done as judge v2 (sonnet + question-anchored
   rubric); it is the only change of the three that reorders within-group
   advantage (rho 0.874, 22.8% of groups change their best trajectory).
 - **2 is nearly inert.** The format term is a constant and drops out of the
@@ -284,13 +285,13 @@ measured effect size:
   TIME_WEIGHT 1.0 moves 3.1% of group winners. Kept (it is the correct
   bookkeeping) but it is not a lever.
 - **3 was abandoned 2026-09-01.** The multi-crop enabler (injecting
-  `longvideoreflection_3k`'s 2-crop traces into stage-1 SFT) was measured
+  `longvideoreflection_3k`'s 2-crop traces into SFT) was measured
   against our frame budget and dropped: those traces sit on ~790s videos
   where our 128-frame global view gives ~7.4 s/frame, and their first crop is
   a median 7 s window — a 124× narrowing the model has no evidence to
   propose. The shaping term went with it.
-- **New item: rebalance difficulty — ADOPTED into round 2** as the
-  epoch-boundary curriculum (GRPO2_PLAN §3e, 2026-09-01): full pool for
+- **New item: rebalance difficulty — ADOPTED into v2** as the
+  epoch-boundary curriculum (GRPO_v2_PLAN §3e, 2026-09-01): full pool for
   epoch 1, then `data_prep/filter_mastered.py` drops prompts whose visit
   came back with mean acc ≥ 0.75 before epoch 2. Calibrated on this run's
   own two visits/prompt: an epoch-1 visit ≥ 0.875 predicted epoch-2

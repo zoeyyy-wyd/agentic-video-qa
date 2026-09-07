@@ -116,7 +116,8 @@ The scripts are the source of truth; this is what they say today.
 Frames    F=128 @ ≤50,176 px/frame       constants.GLOBAL_NUM_FRAMES
 Crops     C=30  @ ≤150,528 px            constants.CROP_NUM_FRAMES, 3 calls max
 GRPO      K=16 × TRAIN_BS=8 = 128 trajectories/step
-          267 steps = 2 epochs over 1,068 prompts, ~12.6 min/step, ~60 h
+          v1: 267 steps = 2 epochs over 1,068 prompts, ~12.6 min/step, ~60 h
+          v2: 133 + 106 steps in two stages (README "Versions"), same per-step cost
 Budget    MAX_PROMPT_LEN=4608 · MAX_RESP_LEN=16384 · max_model_len=20992
 Execution GPU_MEM_UTIL=0.65
           ppo / log_prob max_token_len_per_gpu = 24576
@@ -151,5 +152,5 @@ The raw smoke outputs (`results/smoke*`, `results/grpo-smoke*`, `results/qa-smok
 — console logs and tb events, ~3.6 MB) were deleted on 2026-08-30; this file is
 what survives of them. The offload A/B that ran as `grpo-smoke-opt` is written up
 in `GRPO_NOTES.md` §3d (offload is not where the RAM goes). `results/memtest*`
-is kept — GRPO_NOTES cites it directly. Production-run analysis lives in
-`GRPO_v1_RESULTS.md`.
+is kept — GRPO_NOTES cites it directly. GRPO v1's analysis lives in
+`GRPO_v1_RESULTS.md`, GRPO v2's in `GRPO_v2_RESULTS.md`.

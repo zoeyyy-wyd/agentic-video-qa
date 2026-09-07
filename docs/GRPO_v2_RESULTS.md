@@ -1,26 +1,26 @@
-# V2 Results — the `grpo_v2` recipe (runs 2026-09-03..05)
+# GRPO v2 Results — the `grpo_v2` recipe, its RFT, and the external probe (2026-09-01..05)
 
-Companion to `GRPO2_PLAN.md` (the design) and `GRPO_v1_RESULTS.md` (v1
-forensics). Every number here is on the **v2 instrument** (judge v2 =
-sonnet + question-anchored rubric; reward `compute_score_qa2`, scale
-[0, 2.5]); v1 checkpoints were re-judged onto this scale before comparison
-(`data_prep/rescore_rollouts_v2.py`). Terminology: v1 = grpo-vanilla era,
-v2 = this recipe.
+Companion to `GRPO_v2_PLAN.md` (the design) and `GRPO_v1_RESULTS.md` (v1
+forensics). v1 / v2 and stage 1 / stage 2 are defined in the README
+("Versions"). Every number here is on the **v2 scale** (judge v2 = sonnet +
+question-anchored rubric; reward `compute_score_qa2`, range [0, 2.5]); v1
+checkpoints were re-judged onto this scale before comparison
+(`data_prep/rescore_rollouts_v2.py`).
 
 ## 1. Headline
 
-**v2 beat v1's closing accuracy with 60% of the training steps, and broke
-the localisation plateau v1 was stuck at for its entire run.** RFT
+**GRPO v2 beat GRPO v1's closing accuracy with 60% of the training steps,
+and broke the localisation plateau v1 was stuck at for its entire run.** RFT
 (self-distillation) remained neutral across three attempts — an informative
 negative reconciled with the paper in §5.
 
-| closing 3-checkpoint means | **v2 (200/220/239)** | v1 (240/260/267, rescored) | Δ |
+| closing 3-checkpoint means | **GRPO v2 (steps 200/220/239)** | GRPO v1 (steps 240/260/267, rescored) | Δ |
 |---|---|---|---|
 | val acc | **0.6214** | 0.6023 | **+1.9 pt** (positive; short of the 1-SE clean-win bar ~0.65) |
 | evidence_iou | **0.254** (terminal 0.269, still rising) | ~0.21 (flat all run) | **+4.4 pt** |
 | reward (qa2 scale) | 1.375 | 1.319 | +0.056 |
 
-Recipe deltas vs v1 (all measured, GRPO2_PLAN §3): judge v2 (the one real
+Recipe deltas vs v1 (all measured, GRPO_v2_PLAN §3): judge v2 (the one real
 reward change; within-group advantage Spearman 0.874 vs v1 judging),
 TIME_WEIGHT 1.0 (near-inert, kept), constant lr (hygiene), and the
 **epoch-boundary curriculum** (stage 1 = full 1,068-prompt pool for 133
@@ -56,8 +56,8 @@ stage. Full v1 mid-run rescore: `results/grpo-vanilla/v2_rescore_midrun.json`.
 
 - Score 20-step means 1.27 → 1.39 over stage 1 (late slope +0.27/100 steps
   = 2× v1's fastest); stage 2 jumped to 1.45–1.47.
-- entropy 1.115 → 0.749 (no collapse; compression accelerating — a round-3
-  watch item), grad_norm 0.054 → 0.107, response_length flat ~3.2K (zero
+- entropy 1.115 → 0.749 (no collapse; compression accelerating — a watch
+  item for any v3), grad_norm 0.054 → 0.107, response_length flat ~3.2K (zero
   hacking signature), ~756 s/step.
 - **Saturation** (the v1 plateau mechanism, GRPO_v1_RESULTS §4): v2 reached
   ~31% mastered groups at step ~130 — 2× v1's speed — validating the cut
@@ -83,23 +83,23 @@ reward variance (the advantage's raw material), component stats —
   band, 94 from 0.5–0.75, 22 from 0.25–0.5, 2 from <0.25); 140 of them
   went 16/16.
 
-## 5. RFT (stage 3): five consistent reads of neutral — and why LongVT's worked
+## 5. RFT: five consistent reads of neutral — and why LongVT's worked
 
 ### 5.1 Our results
 
-| run | recipe | val acc | vs grpo_v2 (0.6214) |
+| run | recipe | val acc (v2 scale) | vs GRPO v2 (0.6214) |
 |---|---|---|---|
-| v1 rft | v1 traces, lr 1e-4 | 0.5702 (rescored) | −2.6 pt vs v1-GRPO 0.5965 |
-| rft_v2 | v2 traces, `score>1.5`+acc=1, lr 1e-4 | 0.5833 | −3.8 pt |
-| **rft_v2b** | paper dual criterion (acc=1 **and** iou≥0.3), ≤4/q, **lr 2e-5** | **0.6184** | **−0.3 pt** |
-| rft_v2b_e1 | same, 1 epoch | 0.6140 | −0.7 pt |
+| RFT v1 (`results/rft`) | v1 rollouts, lr 1e-4 | 0.5702 (rescored) | −2.6 pt vs GRPO v1's 0.5965 |
+| RFT v2 (`results/rft-v2`) | v2 rollouts, `score>1.5`+acc=1, lr 1e-4 | 0.5833 | −3.8 pt |
+| **RFT v2b (`results/rft-v2b`)** | LongVT's dual criterion (acc=1 **and** iou≥0.3), ≤4/q, **lr 2e-5** | **0.6184** | **−0.3 pt** |
+| RFT v2b-e1 (`results/rft-v2b-e1`) | same, 1 epoch | 0.6140 | −0.7 pt |
 
-Plus the external read (§6): no RFT variant beats grpo-v2 on Charades
+Plus the external read (§6): no RFT variant beats GRPO v2 on Charades
 either (R@0.5: 52.4 → 46.6 / 49.9). Five reads, one sign, all within noise
 of zero. Two sub-findings:
 
 - **The early negatives were an lr artifact, not distillation damage.**
-  Paired diff of rft_v2 vs its base: 81/114 val rows unchanged, 15↑/18↓ —
+  Paired diff of RFT v2 vs its base: 81/114 val rows unchanged, 15↑/18↓ —
   borderline-row perturbation. lr 1e-4 → 2e-5 plus the tighter data closed
   the gap to −0.3.
 - **Epoch count is not the issue**: 1-epoch ≈ 2-epoch internally; the
@@ -114,7 +114,7 @@ policy gap has nothing to teach.**
 
 LongVT's own Table 2 (7B, 512 frames) localises their RFT gain precisely:
 
-| LongVT-7B stage | VideoSIAH-Eval | benchmark average |
+| LongVT-7B checkpoint | VideoSIAH-Eval | benchmark average |
 |---|---:|---:|
 | SFT | 34.8 | 44.1 |
 | RL | 35.9 (**+1.1**) | 46.6 |
@@ -130,22 +130,22 @@ The +6 lives almost entirely in one column; the other five benchmarks move
    style), and behaviour transfers across duration better than policy
    gradients do. RFT collected what RL left on the table. Our GRPO was
    evaluated in-domain and banked +11 pt itself — no leftovers.
-2. **Their cold start left the niche empty.** LongVT stage 1 is 247K
+2. **Their cold start left the niche empty.** LongVT's cold-start SFT is 247K
    generic mixed CoT (only ~19K tool traces); "supervise on successful
-   in-domain trajectories" happens for the first time at their stage 3, so
+   in-domain trajectories" happens for the first time at their RFT, so
    its marginal value is high.
 3. **Scale**: 15,353 traces and a 7B student vs our 2.9K and 4B.
-4. **We spent the RFT dividend at stage 1 — by design.** The DATA.md §1
-   role inversion: our SFT cold start *is* LongVT's stage-3 RFT data
+4. **We spent the RFT dividend at SFT — by design.** The DATA.md §1
+   role inversion: our SFT cold start *is* LongVT's RFT data
    (their model's doubly-filtered successful rollouts). Our pipeline
    therefore ran an RFT-style consolidation before RL ever started, and
    DATA.md §1 priced this in on 2026-08-25 as a disclosed confound ("RL's
-   marginal gain will read smaller than the paper's… our own stage-3
-   self-distillation must come from our own rollouts"). By our stage 3,
+   marginal gain will read smaller than the paper's… our own RFT
+   self-distillation must come from our own rollouts"). By our RFT,
    both the data niche (2) and the harvestable headroom (1) were spent.
 
 **Net:** the two pipelines book comparable total gains (theirs SFT→final
-+7.2 on VideoSIAH; ours +11 on rl_val) at different stages. "RFT works" vs
++7.2 on VideoSIAH; ours +11 on rl_val) at different points in the pipeline. "RFT works" vs
 "RFT is neutral" is an accounting difference downstream of where the
 successful-trajectory supervision is placed — not a reproduction failure.
 
@@ -165,7 +165,7 @@ is IoU(the policy's crop window, GT span) via the training reward code;
 judge disabled (no API cost). Cross-domain zero-shot: the models never saw
 Charades or span-output training.
 
-| model | mean IoU | R@0.3 | R@0.5 | R@0.7 |
+| model (`results/<dir>/merged`) | mean IoU | R@0.3 | R@0.5 | R@0.7 |
 |---|---:|---:|---:|---:|
 | sft-mix | 0.379 | 56.9% | 37.3% | 17.3% |
 | **grpo-v2** | **0.482** | **71.7%** | **52.4%** | **28.6%** |
@@ -180,7 +180,7 @@ neutral-to-tiny-loss). Dumps: `results/bench-charades-*/val_rollouts/`.
 VideoSIAH-Eval was **deliberately skipped**: its 1,688 s average duration
 is out of the F=128 budget's regime (13.2 s/frame; a crop must beat a
 1/4.27 narrowing to out-resolve the global view) — the scope argument is
-archived in `V2_PLAN.md` §2.
+archived in `GRPO_v2_PLAN.md` Appendix A.
 
 ## 7. Incidents & ops (6, all recovered; ~6 h total loss)
 
@@ -207,7 +207,7 @@ after the incremental-reload fix, `tests/test_judge_cache.py`).
    it rose past a plateau previously diagnosed as a capability limit, and
    the gain transfers zero-shot to an external benchmark (+15 R@0.5).
 4. **RFT is a placement decision.** Successful-trajectory supervision pays
-   wherever it lands first (our stage 1, LongVT's stage 3); running it
+   wherever it lands first (our SFT, LongVT's RFT); running it
    twice pays nothing and, at high lr, slightly perturbs.
 5. **Ops:** host RAM is the binding constraint (all 3 OOMs), long sessions
    creep toward the kill line (resume resets the baseline), and every
@@ -219,11 +219,11 @@ after the incremental-reload fix, `tests/test_judge_cache.py`).
 
 | artifact | path |
 |---|---|
-| **final v2 model** | `results/grpo-v2/merged` |
-| RFT ablation models | `results/rft-v2/merged`, `results/rft-v2b/merged`, `results/rft-v2b-e1/merged` |
-| v2 train/val dumps + tb + curves | `results/grpo-v2/` |
+| **final model (GRPO v2)** | `results/grpo-v2/merged` |
+| RFT v2 models | `results/rft-v2/merged`, `results/rft-v2b/merged`, `results/rft-v2b-e1/merged` |
+| GRPO v2 train/val dumps + tb + curves | `results/grpo-v2/` |
 | per-question CSVs + figures | `results/grpo-v2/per_question_*.{csv,png}` |
-| v1 rescored baselines | `results/grpo-vanilla/v2_rescore{,_midrun}.json` |
+| GRPO v1 re-judged onto the v2 scale | `results/grpo-vanilla/v2_rescore{,_midrun}.json` |
 | RFT evals | `results/val-rft-v2/`, `results/val-rft-v2b/` |
 | Charades probe dumps | `results/bench-charades-*/` |
 | RFT ablation summary (machine-readable, recomputed from dumps) | `results/rft_ablation_summary.json` |
